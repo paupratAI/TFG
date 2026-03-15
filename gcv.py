@@ -1,84 +1,71 @@
 """
-gcv.py — Analytic Ridge Regression with Generalised Cross-Validation (GCV)
-==========================================================================
-Solves the H2O (hidden-to-output) layer analytically.
+gcv.py — Analytic Ridge Regression with Generalised Cross-Validation (GCV).
 
-Mathematical background
------------------------
-Given the feature matrix  Φ ∈ ℝ^{m×H}  and targets  Y ∈ ℝ^{m×1}  the
-Ridge solution is:
+Solves the output (hidden-to-output) layer of the MLP analytically.
+Rather than training the output weights by gradient descent, we find
+the mathematically optimal weights in one closed-form step.
 
-    β̂(λ) = (ΦᵀΦ + λI)⁻¹ ΦᵀY                              (1)
+What is Ridge Regression?
+--------------------------
+Given hidden activations Phi (m x H) and targets Y (m x 1), Ridge
+regression finds output weights beta that minimise:
 
-The hat (smoother) matrix is:
+    ||Y - Phi @ beta||^2  +  lambda * ||beta||^2
 
-    S(λ) = Φ (ΦᵀΦ + λI)⁻¹ Φᵀ ∈ ℝ^{m×m}                    (2)
+The first term minimises prediction error; the second term (scaled by
+lambda) prevents overfitting by penalising large weights.  The solution
+is exact:
 
-GCV score (Allen 1974 / Golub et al. 1979):
+    beta(lambda) = (Phi.T @ Phi + lambda * I)^-1 @ Phi.T @ Y
 
-    GCV(λ) = (1/m) ‖Y - Ŷ‖² / (1 - tr(S)/m)²              (3)
+What is GCV and why do we need it?
+------------------------------------
+Lambda controls how much regularisation to apply.  Too small -> overfit;
+too large -> underfit.  GCV (Golub et al. 1979) efficiently estimates
+which lambda will generalise best, without needing a separate validation
+set.  It approximates Leave-One-Out Cross-Validation (LOOCV) in one pass.
 
-Efficient trace identity (avoids forming the m×m hat matrix):
-
-    tr(S) = tr(Φ (ΦᵀΦ + λI)⁻¹ Φᵀ)
-           = tr((ΦᵀΦ + λI)⁻¹ ΦᵀΦ)      [cyclic property]
-           = tr(K (K + λI)⁻¹)            where K = ΦᵀΦ     (4)
-
-This keeps the cost O(H³) per lambda instead of O(m³).
-
-SVD-based implementation
-------------------------
-Decompose  Φ = U D Vᵀ  (economy SVD, d = min(m,H) singular values).
-Then:
-
-    K = ΦᵀΦ = V D² Vᵀ
-    β̂(λ) = V diag(d²/(d²+λ)) U D / ... [see code]          (5)
-    tr(S) = Σ_k  d_k² / (d_k² + λ)                          (6)
-    Ŷ     = U diag(d²/(d²+λ)) Uᵀ Y                          (7)
-
-Using the SVD avoids explicit matrix inversion (numerically superior)
-and lets us sweep over all λ candidates in O(d) operations each after
-a single O(m·H·min(m,H)) decomposition.
+Why SVD instead of direct matrix inversion?
+--------------------------------------------
+Direct inversion of (Phi.T @ Phi + lambda * I) is numerically unstable
+when Phi has near-zero singular values.  The SVD decomposes Phi = U D V.T
+and expresses the solution using element-wise division by (d^2 + lambda),
+which is always numerically safe.  It also lets us evaluate all lambda
+candidates cheaply after a single decomposition.
 """
 
 import numpy as np
 
 
 def compute_ridge_gcv(
-    Phi: np.ndarray,
-    Y: np.ndarray,
-    lambda_candidates: list[float] = None,
+    Phi              : np.ndarray,
+    Y                : np.ndarray,
+    lambda_candidates: list[float] | None = None,
 ) -> tuple[float, np.ndarray, float]:
     """
-    Select λ via GCV and return the corresponding Ridge weights β.
+    Find the best Ridge penalty lambda via GCV, then return the
+    corresponding weights beta.
 
     Parameters
     ----------
-    Phi : ndarray of shape (m, H)
-        Design / feature matrix (hidden activations + optional bias column).
-    Y   : ndarray of shape (m, 1)
-        Target vector.  For binary classification: {-1, +1}.
-    lambda_candidates : list[float] | None
-        Regularisation values to evaluate.  A logarithmically-spaced default
-        is used when None.
+    Phi               : (m, H)  feature matrix (hidden activations + bias column).
+    Y                 : (m,) or (m, 1)  target vector.
+    lambda_candidates : List of positive regularisation values to try.
+                        If None, 17 log-spaced values on [1e-6, 1e6] are used.
+                        Providing an explicit list is recommended so the grid
+                        boundaries are known.
 
     Returns
     -------
-    best_lambda : float
-        λ that minimises GCV(λ).
-    best_beta   : ndarray of shape (H, 1)
-        Ridge weights β̂(best_lambda).
-    best_gcv    : float
-        Minimum GCV score achieved.
+    best_lambda : float        Lambda that minimised the GCV score.
+    best_beta   : (H, 1)       Ridge weights at best_lambda.
+    best_gcv    : float        The minimum GCV score achieved.
 
     Raises
     ------
-    ValueError
-        If Phi or Y have incompatible shapes.
+    ValueError  If shapes are incompatible or no positive lambda is provided.
     """
-    # ------------------------------------------------------------------
-    # 0.  Input validation
-    # ------------------------------------------------------------------
+    # --- Input checks ---
     if Phi.ndim != 2:
         raise ValueError(f"Phi must be 2-D, got shape {Phi.shape}")
     if Y.ndim == 1:
@@ -89,48 +76,50 @@ def compute_ridge_gcv(
             f"Row mismatch: Phi has {m} rows but Y has {Y.shape[0]} rows."
         )
 
+    # Promote to float64 to avoid cancellation errors in the GCV denominator.
+    Phi64 = Phi.astype(np.float64)
+    Y64   = Y.astype(np.float64)
+
     if lambda_candidates is None:
-        # 13 values from 1e-4 to 1e4 on a log scale
-        lambda_candidates = list(np.logspace(-4, 4, 13))
+        # 17 values spanning [1e-6, 1e6].  The wide range reduces the chance
+        # of the optimal lambda sitting at a grid boundary.
+        lambda_candidates = list(np.logspace(-6, 6, 17))
 
-    # ------------------------------------------------------------------
-    # 1.  Economy SVD  —  Φ = U · diag(d) · Vᵀ
-    #     U  ∈ ℝ^{m×r},  d  ∈ ℝ^r,  V  ∈ ℝ^{H×r}   where r = min(m,H)
-    # ------------------------------------------------------------------
-    U, d, Vt = np.linalg.svd(Phi, full_matrices=False)   # economy SVD
-    d2 = d ** 2                                           # squared sing. vals
-    Uty = U.T @ Y                                         # (r, 1) — precomputed
+    positives = [lam for lam in lambda_candidates if lam > 0]
+    if not positives:
+        raise ValueError("lambda_candidates must contain at least one positive value.")
 
-    # ------------------------------------------------------------------
-    # 2.  Sweep λ candidates (O(r) per candidate after the SVD)
-    # ------------------------------------------------------------------
+    # --- Economy SVD: Phi = U @ diag(d) @ Vt ---
+    # U  : (m, r)   left  singular vectors
+    # d  : (r,)     singular values
+    # Vt : (r, H)   right singular vectors (transposed)
+    # r = min(m, H)
+    U, d, Vt = np.linalg.svd(Phi64, full_matrices=False)
+    d2  = d ** 2
+    Uty = U.T @ Y64    # (r, 1)  — project targets once, reuse across all lambdas
+
     best_gcv    = np.inf
-    best_lambda = lambda_candidates[0]
-    best_beta   = None
+    best_lambda = positives[0]
+    best_beta   : np.ndarray | None = None
 
-    for lam in lambda_candidates:
-        if lam <= 0:
-            continue
+    for lam in positives:
+        # Filter: d^2 / (d^2 + lambda) are the diagonal entries of the hat matrix.
+        d2_scale = d2 / (d2 + lam)                          # (r,)
 
-        # Ridge coefficients in SVD coordinates  (r,)
-        # β̂ = V diag(d/(d²+λ)) Uᵀ Y
-        scale = d / (d2 + lam)          # (r,)   — element-wise
-
-        # Predictions  Ŷ = U diag(d²/(d²+λ)) Uᵀ Y
-        d2_scale = d2 / (d2 + lam)      # (r,)
-        Y_hat    = U @ (d2_scale[:, None] * Uty)   # (m, 1)
-
-        # Residual MSE
-        residuals = Y - Y_hat
+        # Predictions: Y_hat = U @ diag(d2_scale) @ U.T @ Y
+        Y_hat     = U @ (d2_scale[:, None] * Uty)           # (m, 1)
+        residuals = Y64 - Y_hat
         mse       = np.mean(residuals ** 2)
 
-        # Effective degrees of freedom / trace of hat matrix  — eq. (6)
+        # Effective degrees of freedom = trace of the hat matrix.
         trace_S = np.sum(d2_scale)
 
-        # GCV denominator  (1 - tr(S)/m)²
+        # GCV score = MSE / (1 - trace_S/m)^2
+        # The denominator is the GCV "self-influence" correction.
+        # It approaches zero only when lambda -> 0 AND m <= H (more features
+        # than samples).  In our regime m >> H, so this guard is precautionary.
         denom = (1.0 - trace_S / m) ** 2
         if denom < 1e-12:
-            # Perfectly interpolating model; skip this λ
             continue
 
         gcv_score = mse / denom
@@ -138,16 +127,16 @@ def compute_ridge_gcv(
         if gcv_score < best_gcv:
             best_gcv    = gcv_score
             best_lambda = lam
-            # Recover full β̂ ∈ ℝ^{H×1}
-            best_beta   = Vt.T @ (scale[:, None] * Uty)  # (H, 1)
+            # Recover full weights: beta = V @ diag(d / (d^2 + lambda)) @ U.T @ Y
+            scale     = d / (d2 + lam)
+            best_beta = Vt.T @ (scale[:, None] * Uty)       # (H, 1)
 
-    # ------------------------------------------------------------------
-    # 3.  Fallback: if somehow every candidate failed, use largest λ
-    # ------------------------------------------------------------------
+    # Fallback: if every candidate tripped the denom guard (shouldn't happen
+    # in practice when m >> H), use the most-regularised lambda.
     if best_beta is None:
-        lam       = max(lambda_candidates)
-        scale     = d / (d2 + lam)
-        best_beta = Vt.T @ (scale[:, None] * Uty)
+        lam         = max(positives)
+        scale       = d / (d2 + lam)
+        best_beta   = Vt.T @ (scale[:, None] * Uty)
         best_lambda = lam
         best_gcv    = np.inf
 
