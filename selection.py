@@ -110,8 +110,10 @@ def omp_residual_selection(
         # We need a vector q that points in the direction of phi_i*
         # but is orthogonal to all previously selected directions.
         q = Phi64[:, i_star].copy()
-        for q_j in Q:
-            q = q - np.dot(q_j, q) * q_j   # remove component along each existing basis vector
+        if Q:
+            Q_mat = np.column_stack(Q)                 # (m, k)
+            q = q - Q_mat @ (Q_mat.T @ q)             # first pass
+            q = q - Q_mat @ (Q_mat.T @ q)             # second pass (re-orthogonalise)
 
         q_norm = np.linalg.norm(q)
         if q_norm < 1e-10:
@@ -131,6 +133,62 @@ def omp_residual_selection(
 
     # Safety fallback: if MGS skips caused fewer than mu selections,
     # fill remaining slots with the highest marginal-R2 candidates.
+    if len(selected) < mu:
+        fallback = r2_fitness(Phi64, y_v)
+        fallback[np.array(selected, dtype=np.int64)] = -np.inf
+        while len(selected) < mu:
+            fb_idx = int(np.argmax(fallback))
+            selected.append(fb_idx)
+            fallback[fb_idx] = -np.inf
+
+    return np.array(selected[:mu], dtype=np.int64)
+
+
+def _omp_residual_selection_legacy(
+    Phi: np.ndarray,
+    y  : np.ndarray,
+    mu : int,
+) -> np.ndarray:
+    """Reference implementation used only for equivalence testing."""
+    y_v   = y.ravel().astype(np.float64)
+    Phi64 = Phi.astype(np.float64)
+    m, P  = Phi64.shape
+
+    if mu > P:
+        raise ValueError(f"Cannot select {mu} neurons from a pool of {P}.")
+
+    r = y_v - y_v.mean()
+    phi_norms = np.linalg.norm(Phi64, axis=0)
+
+    selected: list[int] = []
+    Q: list[np.ndarray] = []
+    available = np.ones(P, dtype=bool)
+
+    for _ in range(mu):
+        dots   = Phi64.T @ r
+        safe_n = np.where(phi_norms > 1e-10, phi_norms, 1.0)
+        scores = (dots ** 2) / (safe_n ** 2)
+        scores = np.where(phi_norms > 1e-10, scores, 0.0)
+        scores[~available] = -np.inf
+        i_star = int(np.argmax(scores))
+
+        q = Phi64[:, i_star].copy()
+        if Q:
+            Q_mat = np.column_stack(Q)
+            q = q - Q_mat @ (Q_mat.T @ q)
+            q = q - Q_mat @ (Q_mat.T @ q)
+
+        q_norm = np.linalg.norm(q)
+        if q_norm < 1e-10:
+            available[i_star] = False
+            continue
+
+        q = q / q_norm
+        Q.append(q)
+        r = r - np.dot(q, r) * q
+        selected.append(i_star)
+        available[i_star] = False
+
     if len(selected) < mu:
         fallback = r2_fitness(Phi64, y_v)
         fallback[np.array(selected, dtype=np.int64)] = -np.inf
@@ -232,3 +290,18 @@ def diversity_penalised_selection(
         max_sim  = np.maximum(max_sim, new_sims)
 
     return np.array(selected, dtype=np.int64)
+
+
+if __name__ == "__main__":
+    # Deterministic check: vectorised MGS must match legacy selection order.
+    rng = np.random.default_rng(42)
+    m, P, mu = 200, 90, 25
+    Phi_test = rng.standard_normal((m, P))
+    y_test   = rng.choice([-1.0, 1.0], size=m)
+    idx_legacy = _omp_residual_selection_legacy(Phi_test, y_test, mu)
+    idx_vec    = omp_residual_selection(Phi_test, y_test, mu)
+    if not np.array_equal(idx_legacy, idx_vec):
+        raise AssertionError(
+            "Vectorised omp_residual_selection changed selected indices."
+        )
+    print("OMP vectorisation test passed: selected indices are identical.")

@@ -37,6 +37,31 @@ candidates cheaply after a single decomposition.
 import numpy as np
 
 
+def adaptive_lambda_grid(
+    Phi     : np.ndarray,
+    n_points: int = 30,
+) -> list[float]:
+    """
+    Build a lambda grid centred on the relevant singular-value range of Phi.
+
+    Parameters
+    ----------
+    Phi      : (m, H+1) activation matrix with bias column appended.
+    n_points : Number of grid points.
+
+    Returns
+    -------
+    grid : list of positive lambdas.
+    """
+    sv = np.linalg.svd(Phi, compute_uv=False)
+    lam_lo = max(sv[-1] ** 2 / 100.0, 1e-6)
+    lam_hi = min(sv[0] ** 2 * 10.0, 1e6)
+    if lam_lo >= lam_hi:
+        lam_lo = 1e-6
+        lam_hi = 1e6
+    return list(np.logspace(np.log10(lam_lo), np.log10(lam_hi), n_points))
+
+
 def compute_ridge_gcv(
     Phi              : np.ndarray,
     Y                : np.ndarray,

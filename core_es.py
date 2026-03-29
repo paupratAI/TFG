@@ -126,6 +126,22 @@ def mutate_population(
     delta_alpha = np.matmul(L_p, z).squeeze(-1)    # (n_off, D)
     off_alpha   = (alpha_p + delta_alpha).astype(np.float64)
 
+    # --- Guarantee L @ L.T remains well-conditioned (PSD repair) ---
+    # Full correctness check: inspect every offspring covariance.
+    # Performance optimisation (optional): run every few generations or gate this
+    # check when min(abs(diag(L))) is safely above sigma_min.
+    _eps_psd = 1e-6
+    for k in range(n_offspring):
+        cov = L_p[k] @ L_p[k].T
+        min_ev = np.linalg.eigvalsh(cov).min()
+        if min_ev < _eps_psd:
+            cov += (_eps_psd - min_ev + _eps_psd) * np.eye(D)
+            try:
+                L_p[k] = np.linalg.cholesky(cov)
+            except np.linalg.LinAlgError:
+                diag_mean = np.abs(L_p[k].diagonal()).mean()
+                L_p[k] = np.eye(D) * max(diag_mean, sigma_min)
+
     return off_alpha, L_p
 
 

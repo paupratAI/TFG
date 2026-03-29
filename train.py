@@ -22,7 +22,7 @@ from sklearn.metrics import accuracy_score
 from data      import load_dataset
 from core_es   import MichiganESState, mutate_population, compute_activations
 from selection import omp_residual_selection, r2_fitness, diversity_penalised_selection
-from gcv       import compute_ridge_gcv
+from gcv       import compute_ridge_gcv, adaptive_lambda_grid
 
 
 # Lambda grid shared by all Ridge solves.
@@ -95,6 +95,10 @@ def train(
         f"mu={mu} | lambda={n_offspring} | sigma_0={sigma_init}\n"
         + "-" * 65
     )
+    gcv_history: list[float] = []
+    STAGNATION_WINDOW    = 15
+    STAGNATION_THRESHOLD = 0.005
+    SIGMA_RESET_FRACTION = 0.25
 
     for epoch in range(1, epochs + 1):
 
@@ -123,6 +127,34 @@ def train(
                 f"Unknown fitness_strategy={fitness_strategy!r}. "
                 "Choose 'omp' or 'r2'."
             )
+        # --- Weak elitism: guarantee top-k parents survive selection ---
+        # Parents occupy pool indices [0 .. mu-1]. We identify the best ELITE_K
+        # among them by R² and force them into best_idx, displacing the weakest
+        # non-elite survivors. This preserves well-adapted L matrices.
+        ELITE_K = max(1, mu // 10)
+        if epoch > 1 and state.beta is not None:
+            Phi_parents = Phi_pool[:, :mu]
+            elite_scores = r2_fitness(Phi_parents, y_tr)
+            elite_pool_idx = np.argsort(elite_scores)[-ELITE_K:]
+
+            best_idx = best_idx.tolist()
+            best_set = set(best_idx)
+            elite_set = set(elite_pool_idx.tolist())
+            surv_scores = r2_fitness(Phi_pool[:, np.array(best_idx, dtype=np.int64)], y_tr)
+            replace_positions = [
+                pos for pos, sidx in enumerate(best_idx) if sidx not in elite_set
+            ]
+            replace_positions.sort(key=lambda pos: surv_scores[pos])
+            replace_ptr = 0
+            for eidx in elite_pool_idx:
+                if eidx not in best_set:
+                    if replace_ptr < len(replace_positions):
+                        rep_pos = replace_positions[replace_ptr]
+                        best_idx[rep_pos] = eidx
+                        best_set.add(eidx)
+                        replace_ptr += 1
+
+            best_idx = np.array(best_idx, dtype=np.int64)
 
         # Survivors become the new population.
         state.alpha = pool_alpha[best_idx].copy()   # (mu, D)
@@ -133,10 +165,27 @@ def train(
         Phi_surv      = Phi_pool[:, best_idx]                   # (m, mu)
         Phi_surv_bias = np.c_[Phi_surv, np.ones(len(y_tr))]    # (m, mu+1)
 
+        lam_grid = adaptive_lambda_grid(Phi_surv_bias)
         best_lam, best_beta, best_gcv = compute_ridge_gcv(
-            Phi_surv_bias, y_tr, lambda_candidates=LAMBDA_GRID
+            Phi_surv_bias, y_tr, lambda_candidates=lam_grid
         )
         state.beta = best_beta   # (mu+1, 1)
+        gcv_history.append(best_gcv)
+        if len(gcv_history) >= STAGNATION_WINDOW:
+            recent_improvement = gcv_history[-STAGNATION_WINDOW] - gcv_history[-1]
+            relative_improvement = recent_improvement / (abs(gcv_history[-STAGNATION_WINDOW]) + 1e-12)
+            if relative_improvement < STAGNATION_THRESHOLD:
+                scores_now = r2_fitness(Phi_surv, y_tr)
+                n_reset = max(1, int(mu * SIGMA_RESET_FRACTION))
+                worst_idx = np.argsort(scores_now)[:n_reset]
+                state.L[worst_idx] = np.stack(
+                    [np.eye(state.D, dtype=np.float64) * sigma_init for _ in range(n_reset)]
+                )
+                if epoch % verbose == 0:
+                    print(
+                        f"  [stagnation reset: {n_reset} neurons re-initialised "
+                        f"| relative_improvement={relative_improvement:.6f}]"
+                    )
 
         # --- Logging ---
         if epoch % verbose == 0 or epoch == 1:
@@ -146,10 +195,12 @@ def train(
                 np.where(y_hat_tr.ravel() > 0, 1.0, -1.0)
             )
             mean_sigma = state.L[:, np.arange(state.D), np.arange(state.D)].mean()
+            grid_lo, grid_hi = lam_grid[0], lam_grid[-1]
             print(
                 f"Gen {epoch:4d}/{epochs}  |  "
                 f"GCV={best_gcv:.5f}  |  "
                 f"lambda={best_lam:.1e}  |  "
+                f"grid=[{grid_lo:.1e},{grid_hi:.1e}]  |  "
                 f"Train Acc={train_acc:.4f}  |  "
                 f"sigma_mean={mean_sigma:.5f}"
             )
