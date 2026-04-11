@@ -13,7 +13,6 @@ from sklearn.preprocessing import StandardScaler
 
 def load_dataset(
     data_id: int = 150,
-    max_samples: int = 10_000,
     test_size: float = 0.2,
     seed: int = 42,
 ) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
@@ -32,7 +31,6 @@ def load_dataset(
     Parameters
     ----------
     data_id     : OpenML dataset identifier (default 150 = breast-w).
-    max_samples : Subsample the dataset if it exceeds this size.
     test_size   : Fraction of data held out for testing.
     seed        : Random seed for reproducibility.
 
@@ -50,12 +48,6 @@ def load_dataset(
     # Map the two class labels to {-1, +1}.
     unique = np.unique(y)
     y_bin  = np.where(y == unique[0], 1.0, -1.0).astype(np.float64)
-
-    # Optional subsampling before the split to keep runtime manageable.
-    if X.shape[0] > max_samples:
-        rng      = np.random.default_rng(seed)
-        idx      = rng.choice(X.shape[0], max_samples, replace=False)
-        X, y_bin = X[idx], y_bin[idx]
 
     # Step 1: Split.
     X_tr_raw, X_te_raw, y_tr, y_te = train_test_split(

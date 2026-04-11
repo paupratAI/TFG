@@ -14,6 +14,15 @@ Usage
 
 To run the ablation (OMP vs R2), set fitness_strategy="r2" in the train()
 call at the bottom, or import train() from another script.
+
+Performance notes
+-----------------
+- r2_fitness is called ONCE per generation over the full pool (pool_r2).
+  The stagnation-reset block reuses pool_r2[best_idx] instead of making
+  a second r2_fitness call over Phi_surv.
+- adaptive_lambda_grid has been removed: compute_ridge_gcv now builds the
+  adaptive grid internally from the singular values it already computes,
+  so no second SVD is ever issued per generation.
 """
 
 import numpy as np
@@ -22,12 +31,7 @@ from sklearn.metrics import accuracy_score
 from data      import load_dataset
 from core_es   import MichiganESState, mutate_population, compute_activations
 from selection import omp_residual_selection, r2_fitness, diversity_penalised_selection
-from gcv       import compute_ridge_gcv, adaptive_lambda_grid
-
-
-# Lambda grid shared by all Ridge solves.
-# 17 log-spaced values on [1e-6, 1e6] -- wide enough to avoid boundary effects.
-LAMBDA_GRID: list[float] = list(np.logspace(-6, 6, 17))
+from gcv       import compute_ridge_gcv
 
 
 def train(
@@ -112,14 +116,16 @@ def train(
         # No bias column here -- it is added only before the Ridge solve.
         Phi_pool = compute_activations(pool_alpha, X_tr)   # (m, P)
 
+        # Compute r2 ONCE for the full pool; reused by selection and elitism.
+        pool_r2 = r2_fitness(Phi_pool, y_tr)               # (P,)
+
         # --- Step 3: Select ---
         if fitness_strategy == "omp":
             best_idx = omp_residual_selection(Phi_pool, y_tr, mu=mu)
 
         elif fitness_strategy == "r2":
-            scores   = r2_fitness(Phi_pool, y_tr)
             best_idx = diversity_penalised_selection(
-                scores, Phi_pool, mu=mu, gamma=gamma
+                pool_r2, Phi_pool, mu=mu, gamma=gamma
             )
 
         else:
@@ -127,20 +133,21 @@ def train(
                 f"Unknown fitness_strategy={fitness_strategy!r}. "
                 "Choose 'omp' or 'r2'."
             )
+
         # --- Weak elitism: guarantee top-k parents survive selection ---
         # Parents occupy pool indices [0 .. mu-1]. We identify the best ELITE_K
         # among them by R² and force them into best_idx, displacing the weakest
         # non-elite survivors. This preserves well-adapted L matrices.
         ELITE_K = max(1, mu // 10)
         if epoch > 1 and state.beta is not None:
-            Phi_parents = Phi_pool[:, :mu]
-            elite_scores = r2_fitness(Phi_parents, y_tr)
-            elite_pool_idx = np.argsort(elite_scores)[-ELITE_K:]
+            # Reuse pool_r2[:mu] — parents are always the first mu entries in pool.
+            elite_pool_idx = np.argsort(pool_r2[:mu])[-ELITE_K:]
 
             best_idx = best_idx.tolist()
             best_set = set(best_idx)
             elite_set = set(elite_pool_idx.tolist())
-            surv_scores = r2_fitness(Phi_pool[:, np.array(best_idx, dtype=np.int64)], y_tr)
+            # Reuse pool_r2 for survivor scores — no second r2_fitness call.
+            surv_scores = pool_r2[np.array(best_idx, dtype=np.int64)]
             replace_positions = [
                 pos for pos, sidx in enumerate(best_idx) if sidx not in elite_set
             ]
@@ -162,22 +169,27 @@ def train(
 
         # --- Step 4: Solve output layer (Ridge + GCV) ---
         # Append the bias column here, right before the Ridge solve.
+        # compute_ridge_gcv builds the adaptive lambda grid internally from
+        # the singular values it computes — no separate adaptive_lambda_grid call.
         Phi_surv      = Phi_pool[:, best_idx]                   # (m, mu)
         Phi_surv_bias = np.c_[Phi_surv, np.ones(len(y_tr))]    # (m, mu+1)
 
-        lam_grid = adaptive_lambda_grid(Phi_surv_bias)
         best_lam, best_beta, best_gcv = compute_ridge_gcv(
-            Phi_surv_bias, y_tr, lambda_candidates=lam_grid
+            Phi_surv_bias, y_tr
         )
         state.beta = best_beta   # (mu+1, 1)
         gcv_history.append(best_gcv)
+
+        # --- Stagnation detection and sigma reset ---
         if len(gcv_history) >= STAGNATION_WINDOW:
             recent_improvement = gcv_history[-STAGNATION_WINDOW] - gcv_history[-1]
             relative_improvement = recent_improvement / (abs(gcv_history[-STAGNATION_WINDOW]) + 1e-12)
             if relative_improvement < STAGNATION_THRESHOLD:
-                scores_now = r2_fitness(Phi_surv, y_tr)
+                # Reuse pool_r2[best_idx] — same as r2 scores for survivors.
+                # No second r2_fitness call needed.
+                scores_surv = pool_r2[best_idx]
                 n_reset = max(1, int(mu * SIGMA_RESET_FRACTION))
-                worst_idx = np.argsort(scores_now)[:n_reset]
+                worst_idx = np.argsort(scores_surv)[:n_reset]
                 state.L[worst_idx] = np.stack(
                     [np.eye(state.D, dtype=np.float64) * sigma_init for _ in range(n_reset)]
                 )
@@ -195,12 +207,10 @@ def train(
                 np.where(y_hat_tr.ravel() > 0, 1.0, -1.0)
             )
             mean_sigma = state.L[:, np.arange(state.D), np.arange(state.D)].mean()
-            grid_lo, grid_hi = lam_grid[0], lam_grid[-1]
             print(
                 f"Gen {epoch:4d}/{epochs}  |  "
                 f"GCV={best_gcv:.5f}  |  "
                 f"lambda={best_lam:.1e}  |  "
-                f"grid=[{grid_lo:.1e},{grid_hi:.1e}]  |  "
                 f"Train Acc={train_acc:.4f}  |  "
                 f"sigma_mean={mean_sigma:.5f}"
             )

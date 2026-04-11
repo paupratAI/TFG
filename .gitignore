@@ -1,3 +1,5 @@
 __pycache__/
 oldmain.py
 oldgcv.py
+
+.DS_Store

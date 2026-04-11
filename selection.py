@@ -16,6 +16,13 @@ Two strategies are implemented here:
   r2_fitness + diversity_penalised_selection  (ablation baseline)
       Scores each neuron independently by its squared correlation with y,
       then penalises redundant neurons.  Simpler but blind to synergies.
+
+Performance note
+----------------
+omp_residual_selection pre-normalises the columns of Phi once before
+the selection loop.  This means each iteration computes dots = Phi_n.T @ r
+and gets the cosine scores directly without a per-iteration division,
+saving one (P,) vector operation per OMP step.
 """
 
 from __future__ import annotations
@@ -52,8 +59,9 @@ def omp_residual_selection(
 
     Algorithm (one iteration)
     -------------------------
-    1. Score each candidate:   score(i) = (phi_i . r)^2 / ||phi_i||^2
-       This is the fraction of the current residual that neuron i would explain.
+    1. Score each candidate:   score(i) = (phi_n_i . r)^2
+       where phi_n_i is the unit-norm version of phi_i (pre-computed once).
+       This is the squared cosine similarity between phi_i and the residual.
 
     2. Pick the best:          i* = argmax score(i)
 
@@ -77,7 +85,7 @@ def omp_residual_selection(
     selected_idx : (mu,)  integer column indices into Phi, in selection order.
     """
     y_v   = y.ravel().astype(np.float64)
-    Phi64 = Phi.astype(np.float64)
+    Phi64 = np.asfortranarray(Phi, dtype=np.float64)
     m, P  = Phi64.shape
 
     if mu > P:
@@ -88,32 +96,39 @@ def omp_residual_selection(
     # to prevent the first neuron from trivially correlating with a constant.
     r = y_v - y_v.mean()                         # (m,)
 
-    # Pre-compute column norms once for efficient scoring.
-    phi_norms = np.linalg.norm(Phi64, axis=0)    # (P,)
+    # --- Pre-normalise columns ONCE before the loop ---
+    # phi_norms(i) = ||phi_i||.  Degenerate columns get norm=1 to avoid
+    # division by zero; they will score 0 because their dot with r is tiny.
+    phi_norms = np.linalg.norm(Phi64, axis=0)                    # (P,)
+    safe_norms = np.where(phi_norms > 1e-10, phi_norms, 1.0)    # (P,)
+    Phi_n = Phi64 / safe_norms[np.newaxis, :]                    # (m, P)  unit-norm columns
+    degenerate = phi_norms <= 1e-10                              # (P,) bool mask
 
-    selected : list[int]        = []
-    Q        : list[np.ndarray] = []              # growing orthonormal basis
-    available = np.ones(P, dtype=bool)            # False once a neuron is selected
+    selected : list[int] = []
+    Q_mat    = np.empty((m, mu), dtype=np.float64, order='F')  # growing orthonormal basis
+    k        = 0                                     # valid basis columns in Q_mat
+    available = np.ones(P, dtype=bool)               # False once a neuron is selected
 
     for _ in range(mu):
         # --- Step 1: Score all remaining candidates against the residual ---
-        dots   = Phi64.T @ r                                     # (P,)
-        safe_n = np.where(phi_norms > 1e-10, phi_norms, 1.0)    # avoid division by zero
-        scores = (dots ** 2) / (safe_n ** 2)                     # (P,)
-        scores = np.where(phi_norms > 1e-10, scores, 0.0)        # zero-out degenerate neurons
+        # Because columns of Phi_n are unit-norm, dots are cosine similarities.
+        # scores(i) = (phi_n_i . r)^2  — no per-iteration division needed.
+        dots   = Phi_n.T @ r                                     # (P,)
+        scores = dots ** 2                                       # (P,)
+        scores[degenerate]  = 0.0
         scores[~available] = -np.inf
 
         # --- Step 2: Pick best candidate ---
         i_star = int(np.argmax(scores))
 
         # --- Step 3: Modified Gram-Schmidt orthogonalisation ---
-        # We need a vector q that points in the direction of phi_i*
-        # but is orthogonal to all previously selected directions.
+        # We work with the ORIGINAL (unnormalised) column of phi_i* here,
+        # because the orthonormal basis Q must be built from true directions.
         q = Phi64[:, i_star].copy()
-        if Q:
-            Q_mat = np.column_stack(Q)                 # (m, k)
-            q = q - Q_mat @ (Q_mat.T @ q)             # first pass
-            q = q - Q_mat @ (Q_mat.T @ q)             # second pass (re-orthogonalise)
+        if k > 0:
+            Q_k = Q_mat[:, :k]                         # (m, k) view — no copy
+            q = q - Q_k @ (Q_k.T @ q)                 # first pass
+            q = q - Q_k @ (Q_k.T @ q)                 # second pass (re-orthogonalise)
 
         q_norm = np.linalg.norm(q)
         if q_norm < 1e-10:
@@ -123,7 +138,8 @@ def omp_residual_selection(
             continue
 
         q = q / q_norm                      # normalise to unit length
-        Q.append(q)
+        Q_mat[:, k] = q
+        k += 1
 
         # --- Step 4: Update residual ---
         r = r - np.dot(q, r) * q           # project out the captured direction
@@ -229,9 +245,12 @@ def r2_fitness(Phi: np.ndarray, y: np.ndarray) -> np.ndarray:
     """
     y_v    = y.ravel().astype(np.float64)
     Phi64  = Phi.astype(np.float64)
-    phi_c  = Phi64 - Phi64.mean(axis=0, keepdims=True)   # centre columns
-    y_c    = y_v   - y_v.mean()                           # centre target
-    cov    = (phi_c * y_c[:, None]).mean(axis=0)
+    phi_c  = Phi64 - Phi64.mean(axis=0, keepdims=True)
+    y_c    = y_v   - y_v.mean()
+    
+    # PRODUCTE ESCALAR: No col·lapsa la memòria i usa el maquinari BLAS
+    cov    = (phi_c.T @ y_c) / len(y_c)
+    
     std_ph = phi_c.std(axis=0)
     std_y  = y_c.std()
     denom  = np.maximum(std_ph * std_y, 1e-12)

@@ -32,53 +32,41 @@ when Phi has near-zero singular values.  The SVD decomposes Phi = U D V.T
 and expresses the solution using element-wise division by (d^2 + lambda),
 which is always numerically safe.  It also lets us evaluate all lambda
 candidates cheaply after a single decomposition.
+
+Performance note
+----------------
+The previous design called adaptive_lambda_grid (which ran a full SVD)
+and then compute_ridge_gcv (which ran a second full SVD on the same
+matrix).  This module fuses both into a single function so the SVD is
+computed exactly once per generation.
 """
 
 import numpy as np
-
-
-def adaptive_lambda_grid(
-    Phi     : np.ndarray,
-    n_points: int = 30,
-) -> list[float]:
-    """
-    Build a lambda grid centred on the relevant singular-value range of Phi.
-
-    Parameters
-    ----------
-    Phi      : (m, H+1) activation matrix with bias column appended.
-    n_points : Number of grid points.
-
-    Returns
-    -------
-    grid : list of positive lambdas.
-    """
-    sv = np.linalg.svd(Phi, compute_uv=False)
-    lam_lo = max(sv[-1] ** 2 / 100.0, 1e-6)
-    lam_hi = min(sv[0] ** 2 * 10.0, 1e6)
-    if lam_lo >= lam_hi:
-        lam_lo = 1e-6
-        lam_hi = 1e6
-    return list(np.logspace(np.log10(lam_lo), np.log10(lam_hi), n_points))
 
 
 def compute_ridge_gcv(
     Phi              : np.ndarray,
     Y                : np.ndarray,
     lambda_candidates: list[float] | None = None,
+    n_lambda_points  : int = 30,
 ) -> tuple[float, np.ndarray, float]:
     """
     Find the best Ridge penalty lambda via GCV, then return the
     corresponding weights beta.
 
+    The adaptive lambda grid is built internally from the singular values
+    of Phi computed during the SVD, so no second SVD is ever needed.
+
     Parameters
     ----------
     Phi               : (m, H)  feature matrix (hidden activations + bias column).
     Y                 : (m,) or (m, 1)  target vector.
-    lambda_candidates : List of positive regularisation values to try.
-                        If None, 17 log-spaced values on [1e-6, 1e6] are used.
-                        Providing an explicit list is recommended so the grid
-                        boundaries are known.
+    lambda_candidates : Explicit list of positive regularisation values to try.
+                        If None (default), an adaptive grid of n_lambda_points
+                        values is built automatically from the singular values of
+                        Phi.  Providing an explicit list overrides this behaviour.
+    n_lambda_points   : Number of points in the auto-built adaptive grid.
+                        Ignored when lambda_candidates is provided explicitly.
 
     Returns
     -------
@@ -105,23 +93,31 @@ def compute_ridge_gcv(
     Phi64 = Phi.astype(np.float64)
     Y64   = Y.astype(np.float64)
 
-    if lambda_candidates is None:
-        # 17 values spanning [1e-6, 1e6].  The wide range reduces the chance
-        # of the optimal lambda sitting at a grid boundary.
-        lambda_candidates = list(np.logspace(-6, 6, 17))
-
-    positives = [lam for lam in lambda_candidates if lam > 0]
-    if not positives:
-        raise ValueError("lambda_candidates must contain at least one positive value.")
-
     # --- Economy SVD: Phi = U @ diag(d) @ Vt ---
     # U  : (m, r)   left  singular vectors
     # d  : (r,)     singular values
     # Vt : (r, H)   right singular vectors (transposed)
     # r = min(m, H)
+    # NOTE: this is the ONE AND ONLY SVD per generation.
     U, d, Vt = np.linalg.svd(Phi64, full_matrices=False)
     d2  = d ** 2
     Uty = U.T @ Y64    # (r, 1)  — project targets once, reuse across all lambdas
+
+    # --- Build lambda grid from singular values if not provided explicitly ---
+    # This replaces the old adaptive_lambda_grid call, reusing d already computed.
+    if lambda_candidates is None:
+        lam_lo = max(float(d[-1] ** 2) / 100.0, 1e-6)
+        lam_hi = min(float(d[0]  ** 2) * 10.0,  1e6)
+        if lam_lo >= lam_hi:
+            lam_lo = 1e-6
+            lam_hi = 1e6
+        lambda_candidates = list(
+            np.logspace(np.log10(lam_lo), np.log10(lam_hi), n_lambda_points)
+        )
+
+    positives = [lam for lam in lambda_candidates if lam > 0]
+    if not positives:
+        raise ValueError("lambda_candidates must contain at least one positive value.")
 
     best_gcv    = np.inf
     best_lambda = positives[0]
@@ -140,9 +136,6 @@ def compute_ridge_gcv(
         trace_S = np.sum(d2_scale)
 
         # GCV score = MSE / (1 - trace_S/m)^2
-        # The denominator is the GCV "self-influence" correction.
-        # It approaches zero only when lambda -> 0 AND m <= H (more features
-        # than samples).  In our regime m >> H, so this guard is precautionary.
         denom = (1.0 - trace_S / m) ** 2
         if denom < 1e-12:
             continue
