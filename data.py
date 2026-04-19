@@ -12,9 +12,11 @@ from sklearn.preprocessing import StandardScaler
 
 
 def load_dataset(
-    data_id: int = 150,
-    test_size: float = 0.2,
-    seed: int = 42,
+    data_id  : int        = 150,
+    data_name: str | None = "ionosphere",
+    version  : int        = 1,
+    test_size: float      = 0.2,
+    seed     : int        = 42,
 ) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
     """
     Load a binary classification dataset from OpenML and return
@@ -30,9 +32,14 @@ def load_dataset(
 
     Parameters
     ----------
-    data_id     : OpenML dataset identifier (default 150 = breast-w).
-    test_size   : Fraction of data held out for testing.
-    seed        : Random seed for reproducibility.
+    data_id   : OpenML numeric dataset ID. Used only when data_name is None.
+    data_name : OpenML dataset name (default "breast-w"). When not None,
+                this takes priority over data_id. Fetching by name+version
+                is stable across OpenML library versions.
+    version   : Dataset version to fetch when data_name is not None.
+                Default 1 pins the canonical first release.
+    test_size : Fraction of data held out for testing.
+    seed      : Random seed for reproducibility.
 
     Returns
     -------
@@ -41,12 +48,23 @@ def load_dataset(
     y_tr : (m_train, 1)           float64  labels in {-1, +1}.
     y_te : (m_test,  1)           float64  labels in {-1, +1}.
     """
-    print(f"Loading OpenML dataset id={data_id} ...")
-    data = fetch_openml(data_id=data_id, as_frame=False, parser="auto")
+    if data_name is not None:
+        print(f"Loading OpenML dataset name='{data_name}' version={version} ...")
+        data = fetch_openml(
+            name=data_name, version=version, as_frame=False, parser="auto"
+        )
+    else:
+        print(f"Loading OpenML dataset id={data_id} ...")
+        data = fetch_openml(data_id=data_id, as_frame=False, parser="auto")
     X, y = data.data, data.target
 
     # Map the two class labels to {-1, +1}.
     unique = np.unique(y)
+    if len(unique) != 2:
+        raise ValueError(
+            f"load_dataset expects a binary classification dataset, "
+            f"but found {len(unique)} classes: {unique[:5]}..."
+        )
     y_bin  = np.where(y == unique[0], 1.0, -1.0).astype(np.float64)
 
     # Step 1: Split.

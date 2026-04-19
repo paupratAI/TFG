@@ -5,7 +5,7 @@ The central challenge in a Michigan-style ES is credit assignment:
 because all neurons work together to produce a single output, it is
 hard to tell which individual neurons are "good."
 
-Two strategies are implemented here:
+Three strategies are implemented here:
 
   omp_residual_selection  (default, recommended)
       Selects neurons one at a time to explain the variance in y that
@@ -16,6 +16,11 @@ Two strategies are implemented here:
   r2_fitness + diversity_penalised_selection  (ablation baseline)
       Scores each neuron independently by its squared correlation with y,
       then penalises redundant neurons.  Simpler but blind to synergies.
+
+  cfs_selection (correlation-based subset merit)
+      Uses Hall's CFS heuristic adapted to continuous targets: maximise
+      mean neuron-target relevance while penalising mean neuron-neuron
+      redundancy within the selected subset.
 
 Performance note
 ----------------
@@ -307,6 +312,92 @@ def diversity_penalised_selection(
         # Update similarity scores now that i_star is in the selected set.
         new_sims = np.abs(phi_n.T @ phi_n[:, i_star])
         max_sim  = np.maximum(max_sim, new_sims)
+
+    return np.array(selected, dtype=np.int64)
+
+
+def cfs_selection(
+    Phi: np.ndarray,
+    y: np.ndarray,
+    mu: int,
+    epsilon: float = 1e-12,
+) -> np.ndarray:
+    """
+    Select mu neurons using greedy forward search that maximises an adapted
+    CFS merit for continuous targets:
+
+        Merit(S) = k * mean_rcf / sqrt(k + k*(k-1)*mean_rff)
+
+    where mean_rcf is mean squared neuron-target correlation and mean_rff is
+    mean squared neuron-neuron correlation within S.
+    """
+    y_v = y.ravel().astype(np.float64)
+    Phi64 = Phi.astype(np.float64)
+    _m, P = Phi64.shape
+
+    if mu > P:
+        raise ValueError(f"Cannot select {mu} neurons from a pool of {P}.")
+
+    phi_c = Phi64 - Phi64.mean(axis=0, keepdims=True)
+    y_c = y_v - y_v.mean()
+
+    col_norms = np.linalg.norm(phi_c, axis=0)
+    safe_norms = np.where(col_norms > epsilon, col_norms, 1.0)
+    degenerate = col_norms <= epsilon
+
+    y_norm = np.linalg.norm(y_c)
+    safe_y_norm = y_norm if y_norm > epsilon else 1.0
+    phi_n = phi_c / safe_norms[np.newaxis, :]
+
+    # Relevance term: squared neuron-target correlations.
+    r_cf = (phi_n.T @ y_c / safe_y_norm) ** 2
+    r_cf[degenerate] = 0.0
+
+    # Redundancy term matrix: squared neuron-neuron correlations.
+    corr_matrix = phi_n.T @ phi_n
+    C = corr_matrix ** 2
+    C[degenerate, :] = 0.0
+    C[:, degenerate] = 0.0
+
+    selected: list[int] = []
+    available = np.ones(P, dtype=bool)
+    available[degenerate] = False
+
+    sum_rcf = 0.0
+    sum_rff = 0.0
+
+    for step in range(mu):
+        k = step
+        new_k = k + 1
+        new_rcf = sum_rcf + r_cf
+
+        if not selected:
+            new_rff_vec = np.zeros(P, dtype=np.float64)
+        else:
+            new_rff_vec = sum_rff + C[:, selected].sum(axis=1)
+
+        mean_rcf_vec = new_rcf / new_k
+        if new_k > 1:
+            n_pairs = new_k * (new_k - 1) / 2.0
+            mean_rff_vec = new_rff_vec / n_pairs
+        else:
+            mean_rff_vec = np.zeros(P, dtype=np.float64)
+
+        denom_sq_vec = new_k + new_k * (new_k - 1) * mean_rff_vec
+        denom_sq_vec = np.maximum(denom_sq_vec, epsilon)
+
+        merit_vec = new_k * mean_rcf_vec / np.sqrt(denom_sq_vec)
+        merit_vec[~available] = -np.inf
+        merit_vec[degenerate] = -np.inf
+
+        i_star = int(np.argmax(merit_vec))
+
+        if selected:
+            sum_rff += float(C[i_star, selected].sum())
+        sum_rcf += float(r_cf[i_star])
+
+        selected.append(i_star)
+        available[i_star] = False
 
     return np.array(selected, dtype=np.int64)
 

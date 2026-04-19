@@ -115,7 +115,8 @@ def mutate_population(
     diag_idx  = np.arange(D)
     diag_vals = L_p[:, diag_idx, diag_idx]
     new_diag  = diag_vals * np.exp(tau_p * xi_global[:, None] + tau * xi_local)
-    L_p[:, diag_idx, diag_idx] = np.maximum(new_diag, sigma_min)
+    sigma_max = 10.0
+    L_p[:, diag_idx, diag_idx] = np.clip(new_diag, sigma_min, sigma_max)
 
     # --- Mutate off-diagonal (rotation) ---
     i_idx, j_idx = np.tril_indices(D, k=-1)
@@ -127,8 +128,8 @@ def mutate_population(
     off_alpha   = (alpha_p + delta_alpha).astype(np.float64)
 
     # Lightweight vectorised safety clamp — no Python loop, no eigvalsh
-    L_p[:, diag_idx, diag_idx] = np.maximum(
-        L_p[:, diag_idx, diag_idx], sigma_min
+    L_p[:, diag_idx, diag_idx] = np.clip(
+        L_p[:, diag_idx, diag_idx], sigma_min, sigma_max
     )
 
     return off_alpha, L_p
@@ -156,4 +157,5 @@ def compute_activations(alpha: np.ndarray, X: np.ndarray) -> np.ndarray:
     act = X @ W.T
     act += b
     np.tanh(act, out=act)
+    np.nan_to_num(act, nan=0.0, posinf=1.0, neginf=-1.0, copy=False)
     return act

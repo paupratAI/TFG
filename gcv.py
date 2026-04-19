@@ -49,6 +49,7 @@ def compute_ridge_gcv(
     Y                : np.ndarray,
     lambda_candidates: list[float] | None = None,
     n_lambda_points  : int = 30,
+    lambda_override  : float | None = None,
 ) -> tuple[float, np.ndarray, float]:
     """
     Find the best Ridge penalty lambda via GCV, then return the
@@ -67,12 +68,15 @@ def compute_ridge_gcv(
                         Phi.  Providing an explicit list overrides this behaviour.
     n_lambda_points   : Number of points in the auto-built adaptive grid.
                         Ignored when lambda_candidates is provided explicitly.
+    lambda_override   : If not None, skip GCV grid search and solve Ridge with
+                        this fixed lambda. The returned GCV score is NaN.
 
     Returns
     -------
     best_lambda : float        Lambda that minimised the GCV score.
     best_beta   : (H, 1)       Ridge weights at best_lambda.
-    best_gcv    : float        The minimum GCV score achieved.
+    best_gcv    : float        The minimum GCV score achieved, or NaN when
+                               lambda_override is used.
 
     Raises
     ------
@@ -102,6 +106,13 @@ def compute_ridge_gcv(
     U, d, Vt = np.linalg.svd(Phi64, full_matrices=False)
     d2  = d ** 2
     Uty = U.T @ Y64    # (r, 1)  — project targets once, reuse across all lambdas
+
+    # --- Lambda override: bypass GCV entirely ---
+    if lambda_override is not None:
+        lam = float(lambda_override)
+        scale = d / (d2 + lam)
+        forced_beta = Vt.T @ (scale[:, None] * Uty)   # (H, 1)
+        return lam, forced_beta, np.nan
 
     # --- Build lambda grid from singular values if not provided explicitly ---
     # This replaces the old adaptive_lambda_grid call, reusing d already computed.
