@@ -30,13 +30,14 @@ import time
 import numpy as np
 from sklearn.metrics import accuracy_score
 
-from data      import load_dataset
+from data      import load_dataset, load_dataset_with_validation
 from core_es   import MichiganESState, mutate_population, compute_activations
 from selection import (
     omp_residual_selection,
     r2_fitness,
     diversity_penalised_selection,
     cfs_selection,
+    cfs_auc_selection,
 )
 from gcv       import compute_ridge_gcv
 
@@ -52,6 +53,7 @@ def train(
     data_name       : str | None = None,
     data_version    : int   = 1,
     test_size       : float = 0.2,
+    validation_size : float = 0.0,
     data_home       : str | None = ".openml_cache",
     verbose         : int   = 10,
     seed            : int   = 42,
@@ -75,6 +77,7 @@ def train(
                     'omp' uses sequential residual fitting (recommended).
                     'r2'  uses marginal R² + diversity penalty (ablation).
                     'cfs' uses subset merit balancing relevance/redundancy.
+                    'cfs_auc' uses AUC relevance + Spearman redundancy.
 
         Solve    ->  fit the output layer analytically using Ridge + GCV on
                      the mu survivors.  No gradient descent is needed here.
@@ -87,7 +90,7 @@ def train(
 
     Parameters
     ----------
-    fitness_strategy : 'omp' (default), 'r2' (ablation), or 'cfs'.
+    fitness_strategy : 'omp' (default), 'r2' (ablation), 'cfs', or 'cfs_auc'.
     epochs           : Number of ES generations to run.
     mu               : Population size = hidden layer width.
     n_offspring      : Offspring produced per generation (lambda).
@@ -97,6 +100,8 @@ def train(
     data_name        : Optional OpenML dataset name. If provided, overrides data_id.
     data_version     : OpenML version used when data_name is provided.
     test_size        : Fraction of data held out for testing.
+    validation_size  : Fraction of the non-test data held out for validation.
+                       Set to 0.0 to disable validation.
     data_home        : Local OpenML cache directory.
     verbose          : Print a log line every this many generations.
     seed             : Global random seed.
@@ -110,9 +115,11 @@ def train(
     -------
     state : MichiganESState with the final evolved population and output weights.
     """
-    if fitness_strategy not in {"omp", "r2", "cfs"}:
+    valid_strategies = {"omp", "r2", "cfs", "cfs_auc"}
+    if fitness_strategy not in valid_strategies:
         raise ValueError(
-            f"Unknown fitness_strategy={fitness_strategy!r}. Choose 'omp', 'r2', or 'cfs'."
+            f"Unknown fitness_strategy={fitness_strategy!r}. "
+            f"Choose one of {sorted(valid_strategies)}."
         )
     if epochs < 1:
         raise ValueError("epochs must be >= 1.")
@@ -127,14 +134,27 @@ def train(
     total_t0 = time.perf_counter()
 
     # --- Load data ---
-    X_tr, X_te, y_tr, y_te = load_dataset(
-        data_id=data_id,
-        data_name=data_name,
-        version=data_version,
-        test_size=test_size,
-        seed=seed,
-        data_home=data_home,
-    )
+    X_val = None
+    y_val = None
+    if validation_size > 0.0:
+        X_tr, X_val, X_te, y_tr, y_val, y_te = load_dataset_with_validation(
+            data_id=data_id,
+            data_name=data_name,
+            version=data_version,
+            validation_size=validation_size,
+            test_size=test_size,
+            seed=seed,
+            data_home=data_home,
+        )
+    else:
+        X_tr, X_te, y_tr, y_te = load_dataset(
+            data_id=data_id,
+            data_name=data_name,
+            version=data_version,
+            test_size=test_size,
+            seed=seed,
+            data_home=data_home,
+        )
 
     # --- Overfit mode: restrict training set to a tiny random subset ---
     if overfit:
@@ -203,10 +223,13 @@ def train(
         elif effective_strategy == "cfs":
             best_idx = cfs_selection(Phi_pool, y_tr, mu=effective_mu)
 
+        elif effective_strategy == "cfs_auc":
+            best_idx = cfs_auc_selection(Phi_pool, y_tr, mu=effective_mu)
+
         else:
             raise ValueError(
                 f"Unknown fitness_strategy={fitness_strategy!r}. "
-                "Choose 'omp', 'r2', or 'cfs'."
+                f"Choose one of {sorted(valid_strategies)}."
             )
         select_ms = (time.perf_counter() - select_t0) * 1e3
         select_ms_history.append(select_ms)
@@ -321,6 +344,15 @@ def train(
         y_te.ravel(),
         np.where(test_hat.ravel() > 0, 1.0, -1.0)
     ))
+    val_acc = None
+    if X_val is not None and y_val is not None:
+        Phi_val = compute_activations(state.alpha, X_val)
+        Phi_val_bias = np.c_[Phi_val, np.ones(len(y_val))]
+        val_hat = Phi_val_bias @ state.beta
+        val_acc = float(accuracy_score(
+            y_val.ravel(),
+            np.where(val_hat.ravel() > 0, 1.0, -1.0)
+        ))
     total_elapsed = time.perf_counter() - total_t0
     final_metrics = {
         "strategy": fitness_strategy,
@@ -329,11 +361,13 @@ def train(
         "data_name": data_name,
         "data_version": data_version,
         "data_home": data_home,
+        "validation_size": validation_size,
         "seed": seed,
         "epochs": epochs,
         "n_offspring": n_offspring,
         "overfit": overfit,
         "final_train_acc": history[-1]["train_acc"],
+        "validation_acc": val_acc,
         "test_acc": test_acc,
         "final_gcv": history[-1]["gcv"],
         "final_lambda": history[-1]["lambda"],
@@ -347,6 +381,8 @@ def train(
     state.metrics = final_metrics
     print(f"\n{'=' * 65}")
     print(f"  Strategy     : {fitness_strategy!r}")
+    if val_acc is not None:
+        print(f"  Val Accuracy : {val_acc:.4f}")
     print(f"  Test Accuracy: {test_acc:.4f}")
     if select_ms_history and epoch_ms_history:
         select_mean = float(np.mean(select_ms_history))
@@ -413,7 +449,11 @@ def _save_run_artifacts(
 
 def build_arg_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="Train the Michigan-style ES MLP.")
-    parser.add_argument("--strategy", choices=["omp", "r2", "cfs"], default="omp")
+    parser.add_argument(
+        "--strategy",
+        choices=["omp", "r2", "cfs", "cfs_auc"],
+        default="omp",
+    )
     parser.add_argument("--epochs", type=int, default=100)
     parser.add_argument("--mu", type=int, default=50)
     parser.add_argument("--offspring", type=int, default=350)
@@ -423,6 +463,7 @@ def build_arg_parser() -> argparse.ArgumentParser:
     parser.add_argument("--data-name", default=None)
     parser.add_argument("--data-version", type=int, default=1)
     parser.add_argument("--test-size", type=float, default=0.2)
+    parser.add_argument("--validation-size", type=float, default=0.0)
     parser.add_argument("--data-home", default=".openml_cache")
     parser.add_argument("--verbose", type=int, default=10)
     parser.add_argument("--seed", type=int, default=42)
@@ -447,6 +488,7 @@ def main() -> None:
         data_name=args.data_name,
         data_version=args.data_version,
         test_size=args.test_size,
+        validation_size=args.validation_size,
         data_home=args.data_home,
         verbose=args.verbose,
         seed=args.seed,

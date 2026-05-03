@@ -36,7 +36,12 @@ Run an ablation:
 ```bash
 python train.py --strategy r2 --data-id 59 --epochs 100
 python train.py --strategy cfs --data-id 59 --epochs 100
+python train.py --strategy cfs_auc --data-id 59 --epochs 100
 ```
+
+`cfs_auc` keeps the CFS subset-merit structure, but replaces Pearson
+neuron-target relevance with squared Gini-AUC and replaces Pearson
+neuron-neuron redundancy with squared Spearman correlation.
 
 Run the memorisation/overfit demo:
 
@@ -49,6 +54,17 @@ Run the Level-1 benchmark:
 ```bash
 python benchmark_level1.py
 ```
+
+Compare the four ES selection strategies on the same train/validation/test
+split and save a plot:
+
+```bash
+python compare_strategies.py --epochs 100 --output-dir runs/strategy_comparison
+```
+
+The comparison plot contains the training-accuracy curve for each strategy and
+the final validation/test accuracy bars. Use validation accuracy for strategy
+selection, and keep test accuracy as the final held-out estimate.
 
 ## Dataset Selection
 

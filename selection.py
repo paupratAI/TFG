@@ -5,7 +5,7 @@ The central challenge in a Michigan-style ES is credit assignment:
 because all neurons work together to produce a single output, it is
 hard to tell which individual neurons are "good."
 
-Three strategies are implemented here:
+Four strategies are implemented here:
 
   omp_residual_selection  (default, recommended)
       Selects neurons one at a time to explain the variance in y that
@@ -21,6 +21,11 @@ Three strategies are implemented here:
       Uses Hall's CFS heuristic adapted to continuous targets: maximise
       mean neuron-target relevance while penalising mean neuron-neuron
       redundancy within the selected subset.
+
+  cfs_auc_selection (ranking-based CFS ablation)
+      Uses squared Gini-AUC as neuron-target relevance and squared Spearman
+      correlation as neuron-neuron redundancy.  This tests whether ranking
+      quality is a better selection signal than linear correlation.
 
 Performance note
 ----------------
@@ -369,6 +374,144 @@ def cfs_selection(
     for step in range(mu):
         k = step
         new_k = k + 1
+        new_rcf = sum_rcf + r_cf
+
+        if not selected:
+            new_rff_vec = np.zeros(P, dtype=np.float64)
+        else:
+            new_rff_vec = sum_rff + C[:, selected].sum(axis=1)
+
+        mean_rcf_vec = new_rcf / new_k
+        if new_k > 1:
+            n_pairs = new_k * (new_k - 1) / 2.0
+            mean_rff_vec = new_rff_vec / n_pairs
+        else:
+            mean_rff_vec = np.zeros(P, dtype=np.float64)
+
+        denom_sq_vec = new_k + new_k * (new_k - 1) * mean_rff_vec
+        denom_sq_vec = np.maximum(denom_sq_vec, epsilon)
+
+        merit_vec = new_k * mean_rcf_vec / np.sqrt(denom_sq_vec)
+        merit_vec[~available] = -np.inf
+        merit_vec[degenerate] = -np.inf
+
+        if not np.any(np.isfinite(merit_vec)):
+            fallback = r2_fitness(Phi64, y_v.astype(np.float64))
+            if selected:
+                fallback[np.array(selected, dtype=np.int64)] = -np.inf
+            i_star = int(np.argmax(fallback))
+        else:
+            i_star = int(np.argmax(merit_vec))
+
+        if selected:
+            sum_rff += float(C[i_star, selected].sum())
+        sum_rcf += float(r_cf[i_star])
+
+        selected.append(i_star)
+        available[i_star] = False
+
+    return np.array(selected, dtype=np.int64)
+
+
+def _rank_columns_average(X: np.ndarray) -> np.ndarray:
+    """
+    Return 1-based average ranks for each column, with average handling of ties.
+
+    NumPy has no built-in rankdata equivalent, and keeping this local avoids
+    adding SciPy as a dependency just for Spearman/AUC tie handling.
+    """
+    X64 = np.asarray(X, dtype=np.float64)
+    m, P = X64.shape
+    ranks = np.empty((m, P), dtype=np.float64)
+
+    for j in range(P):
+        order = np.argsort(X64[:, j], kind="mergesort")
+        sorted_vals = X64[order, j]
+
+        start = 0
+        while start < m:
+            end = start + 1
+            while end < m and sorted_vals[end] == sorted_vals[start]:
+                end += 1
+
+            # 1-based average rank for the tied block [start, end).
+            avg_rank = 0.5 * (start + 1 + end)
+            ranks[order[start:end], j] = avg_rank
+            start = end
+
+    return ranks
+
+
+def cfs_auc_selection(
+    Phi: np.ndarray,
+    y: np.ndarray,
+    mu: int,
+    epsilon: float = 1e-12,
+) -> np.ndarray:
+    """
+    Select mu neurons with a ranking-based CFS variant.
+
+    The CFS structure is the same as cfs_selection:
+
+        Merit(S) = k * mean_rcf / sqrt(k + k*(k-1)*mean_rff)
+
+    but the statistics change:
+
+      - r_cf = (2*AUC(phi_i, y) - 1)^2
+        AUC=0.5 maps to 0, while AUC=0 or AUC=1 both map to 1 because an
+        inverted neuron can still be useful to the signed Ridge output layer.
+
+      - r_ff = Spearman(phi_i, phi_j)^2
+        Redundancy is rank-based, so monotonic duplicates are penalised even
+        when their raw activation scales differ.
+    """
+    y_v = y.ravel()
+    Phi64 = Phi.astype(np.float64)
+    m, P = Phi64.shape
+
+    if mu > P:
+        raise ValueError(f"Cannot select {mu} neurons from a pool of {P}.")
+
+    classes = np.unique(y_v)
+    if len(classes) != 2:
+        raise ValueError(
+            f"cfs_auc_selection expects binary labels, found {len(classes)} classes."
+        )
+
+    pos_mask = y_v == classes[-1]
+    n_pos = int(pos_mask.sum())
+    n_neg = int(m - n_pos)
+    if n_pos == 0 or n_neg == 0:
+        raise ValueError("cfs_auc_selection needs at least one sample per class.")
+
+    ranks = _rank_columns_average(Phi64)
+    col_range = Phi64.max(axis=0) - Phi64.min(axis=0)
+    degenerate = col_range <= epsilon
+
+    # Relevance term: squared centred AUC/Gini coefficient.
+    pos_rank_sum = ranks[pos_mask].sum(axis=0)
+    auc = (pos_rank_sum - n_pos * (n_pos + 1) / 2.0) / (n_pos * n_neg)
+    r_cf = (2.0 * auc - 1.0) ** 2
+    r_cf[degenerate] = 0.0
+
+    # Redundancy term: squared Spearman correlation between activation ranks.
+    rank_c = ranks - ranks.mean(axis=0, keepdims=True)
+    rank_norms = np.linalg.norm(rank_c, axis=0)
+    safe_norms = np.where(rank_norms > epsilon, rank_norms, 1.0)
+    rank_n = rank_c / safe_norms[np.newaxis, :]
+    C = (rank_n.T @ rank_n) ** 2
+    C[degenerate, :] = 0.0
+    C[:, degenerate] = 0.0
+
+    selected: list[int] = []
+    available = np.ones(P, dtype=bool)
+    available[degenerate] = False
+
+    sum_rcf = 0.0
+    sum_rff = 0.0
+
+    for step in range(mu):
+        new_k = step + 1
         new_rcf = sum_rcf + r_cf
 
         if not selected:
