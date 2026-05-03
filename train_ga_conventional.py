@@ -128,7 +128,11 @@ def train_conventional_ga(
     crossover_rate: float = 0.9,
     mutation_rate: float = 0.08,
     mutation_scale: float = 0.10,
-    data_id: int = 150,
+    data_id: int = 59,
+    data_name: str | None = None,
+    data_version: int = 1,
+    test_size: float = 0.2,
+    data_home: str | None = ".openml_cache",
     verbose: int = 10,
     seed: int = 42,
 ) -> dict[str, float | np.ndarray]:
@@ -137,9 +141,24 @@ def train_conventional_ga(
     """
     if elite_size >= pop_size:
         raise ValueError("elite_size must be < pop_size.")
+    if generations < 1:
+        raise ValueError("generations must be >= 1.")
+    if pop_size < 2:
+        raise ValueError("pop_size must be >= 2.")
+    if hidden_units < 1:
+        raise ValueError("hidden_units must be >= 1.")
+    if verbose < 1:
+        raise ValueError("verbose must be >= 1.")
 
     rng = np.random.default_rng(seed)
-    X_tr, X_te, y_tr, y_te = load_dataset(data_id=data_id, seed=seed)
+    X_tr, X_te, y_tr, y_te = load_dataset(
+        data_id=data_id,
+        data_name=data_name,
+        version=data_version,
+        test_size=test_size,
+        seed=seed,
+        data_home=data_home,
+    )
     n_features = X_tr.shape[1]
     D = n_features + 1
     init_bound = 1.0 / np.sqrt(n_features)
@@ -156,6 +175,7 @@ def train_conventional_ga(
     best_beta = None
     best_gcv = np.inf
     best_train_acc = 0.0
+    history: list[dict[str, float | int]] = []
 
     t0 = time.perf_counter()
     print(
@@ -183,6 +203,15 @@ def train_conventional_ga(
             best_beta = betas[gen_best].copy()
             best_gcv = float(gcv_vals[gen_best])
             best_train_acc = float(train_acc[gen_best])
+
+        history.append(
+            {
+                "generation": gen,
+                "best_fitness": float(fitness[gen_best]),
+                "train_acc": float(train_acc[gen_best]),
+                "gcv": float(gcv_vals[gen_best]),
+            }
+        )
 
         if gen % verbose == 0 or gen == 1:
             print(
@@ -238,6 +267,7 @@ def train_conventional_ga(
         "elapsed_seconds": float(elapsed),
         "best_chromosome": best_chromosome,
         "best_beta": best_beta,
+        "history": history,
     }
 
 
@@ -251,7 +281,7 @@ if __name__ == "__main__":
         crossover_rate=0.9,
         mutation_rate=0.08,
         mutation_scale=0.10,
-        data_id=150,
+        data_id=59,
         verbose=10,
         seed=42,
     )

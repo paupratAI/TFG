@@ -10,10 +10,7 @@ This script orchestrates the full training procedure:
 
 Usage
 -----
-    python train.py
-
-To run the ablation (OMP vs R2), set fitness_strategy="r2" in the train()
-call at the bottom, or import train() from another script.
+    python train.py --strategy omp --data-id 59 --epochs 100 --save-dir runs
 
 Performance notes
 -----------------
@@ -25,8 +22,12 @@ Performance notes
   so no second SVD is ever issued per generation.
 """
 
-import numpy as np
+import argparse
+import json
+from pathlib import Path
 import time
+
+import numpy as np
 from sklearn.metrics import accuracy_score
 
 from data      import load_dataset
@@ -47,13 +48,18 @@ def train(
     n_offspring     : int   = 350,
     sigma_init      : float = 0.3,
     gamma           : float = 0.3,
-    data_id         : int   = 150,
+    data_id         : int   = 59,
+    data_name       : str | None = None,
+    data_version    : int   = 1,
+    test_size       : float = 0.2,
+    data_home       : str | None = ".openml_cache",
     verbose         : int   = 10,
     seed            : int   = 42,
     overfit          : bool  = False,
     overfit_n_samples: int   = 60,
-    overfit_mu       : int   = 250,
+    overfit_mu       : int   = 50,
     overfit_lambda   : float = 1e-8,
+    save_dir         : str | Path | None = None,
 ) -> MichiganESState:
     """
     Run the Michigan-style (mu + lambda)-ES training loop.
@@ -88,21 +94,47 @@ def train(
     sigma_init       : Initial mutation step size (L diagonal value).
     gamma            : Diversity penalty weight, used only for 'r2' strategy.
     data_id          : OpenML dataset identifier.
+    data_name        : Optional OpenML dataset name. If provided, overrides data_id.
+    data_version     : OpenML version used when data_name is provided.
+    test_size        : Fraction of data held out for testing.
+    data_home        : Local OpenML cache directory.
     verbose          : Print a log line every this many generations.
     seed             : Global random seed.
     overfit          : If True, enable memorisation demo (subset train, tiny ridge).
     overfit_n_samples: Training rows when overfit=True (capped by available).
     overfit_mu       : Population size when overfit=True (replaces mu).
     overfit_lambda   : Fixed Ridge lambda when overfit=True (bypasses GCV).
+    save_dir         : Optional directory where model arrays and JSON metadata are saved.
 
     Returns
     -------
     state : MichiganESState with the final evolved population and output weights.
     """
+    if fitness_strategy not in {"omp", "r2", "cfs"}:
+        raise ValueError(
+            f"Unknown fitness_strategy={fitness_strategy!r}. Choose 'omp', 'r2', or 'cfs'."
+        )
+    if epochs < 1:
+        raise ValueError("epochs must be >= 1.")
+    if mu < 1:
+        raise ValueError("mu must be >= 1.")
+    if n_offspring < 1:
+        raise ValueError("n_offspring must be >= 1.")
+    if verbose < 1:
+        raise ValueError("verbose must be >= 1.")
+
     np.random.seed(seed)
+    total_t0 = time.perf_counter()
 
     # --- Load data ---
-    X_tr, X_te, y_tr, y_te = load_dataset(data_id=data_id, seed=seed)
+    X_tr, X_te, y_tr, y_te = load_dataset(
+        data_id=data_id,
+        data_name=data_name,
+        version=data_version,
+        test_size=test_size,
+        seed=seed,
+        data_home=data_home,
+    )
 
     # --- Overfit mode: restrict training set to a tiny random subset ---
     if overfit:
@@ -133,6 +165,7 @@ def train(
     gcv_history: list[float] = []
     select_ms_history: list[float] = []
     epoch_ms_history: list[float] = []
+    history: list[dict[str, float | int | str]] = []
     STAGNATION_WINDOW    = 15
     STAGNATION_THRESHOLD = 0.005
     SIGMA_RESET_FRACTION = 0.25
@@ -223,7 +256,15 @@ def train(
         stagnation_metric = -float(np.max(pool_r2[best_idx])) if overfit else best_gcv
         gcv_history.append(stagnation_metric)
 
+        y_hat_tr  = Phi_surv_bias @ state.beta
+        train_acc = float(accuracy_score(
+            y_tr.ravel(),
+            np.where(y_hat_tr.ravel() > 0, 1.0, -1.0)
+        ))
+        mean_sigma = float(state.L[:, np.arange(state.D), np.arange(state.D)].mean())
+
         # --- Stagnation detection and sigma reset ---
+        reset_count = 0
         if not overfit:
             if len(gcv_history) >= STAGNATION_WINDOW:
                 recent_improvement = gcv_history[-STAGNATION_WINDOW] - gcv_history[-1]
@@ -238,6 +279,7 @@ def train(
                     state.L[worst_idx] = np.stack(
                         [np.eye(state.D, dtype=np.float64) * reset_sigma for _ in range(n_reset)]
                     )
+                    reset_count = n_reset
                     if epoch % verbose == 0:
                         print(
                             f"  [stagnation reset: {n_reset} neurons re-initialised "
@@ -245,15 +287,22 @@ def train(
                         )
 
         # --- Logging ---
+        epoch_ms = (time.perf_counter() - epoch_t0) * 1e3
+        epoch_ms_history.append(epoch_ms)
+        history.append(
+            {
+                "epoch": epoch,
+                "strategy": effective_strategy,
+                "gcv": float(best_gcv) if np.isfinite(best_gcv) else float("nan"),
+                "lambda": float(best_lam),
+                "train_acc": train_acc,
+                "sigma_mean": mean_sigma,
+                "select_ms": float(select_ms),
+                "epoch_ms": float(epoch_ms),
+                "reset_count": reset_count,
+            }
+        )
         if epoch % verbose == 0 or epoch == 1:
-            epoch_ms = (time.perf_counter() - epoch_t0) * 1e3
-            epoch_ms_history.append(epoch_ms)
-            y_hat_tr  = Phi_surv_bias @ state.beta
-            train_acc = accuracy_score(
-                y_tr.ravel(),
-                np.where(y_hat_tr.ravel() > 0, 1.0, -1.0)
-            )
-            mean_sigma = state.L[:, np.arange(state.D), np.arange(state.D)].mean()
             print(
                 f"Gen {epoch:4d}/{epochs}  |  "
                 f"GCV={best_gcv:.5f}  |  "
@@ -263,17 +312,39 @@ def train(
                 f"select_ms={select_ms:.1f}  |  "
                 f"epoch_ms={epoch_ms:.1f}"
             )
-        else:
-            epoch_ms_history.append((time.perf_counter() - epoch_t0) * 1e3)
 
     # --- Final test evaluation ---
     Phi_test      = compute_activations(state.alpha, X_te)       # (m_te, mu)
     Phi_test_bias = np.c_[Phi_test, np.ones(len(y_te))]         # (m_te, mu+1)
     test_hat      = Phi_test_bias @ state.beta
-    test_acc      = accuracy_score(
+    test_acc      = float(accuracy_score(
         y_te.ravel(),
         np.where(test_hat.ravel() > 0, 1.0, -1.0)
-    )
+    ))
+    total_elapsed = time.perf_counter() - total_t0
+    final_metrics = {
+        "strategy": fitness_strategy,
+        "effective_mu": effective_mu,
+        "data_id": data_id,
+        "data_name": data_name,
+        "data_version": data_version,
+        "data_home": data_home,
+        "seed": seed,
+        "epochs": epochs,
+        "n_offspring": n_offspring,
+        "overfit": overfit,
+        "final_train_acc": history[-1]["train_acc"],
+        "test_acc": test_acc,
+        "final_gcv": history[-1]["gcv"],
+        "final_lambda": history[-1]["lambda"],
+        "elapsed_seconds": float(total_elapsed),
+        "select_ms_mean": float(np.mean(select_ms_history)),
+        "select_ms_median": float(np.median(select_ms_history)),
+        "epoch_ms_mean": float(np.mean(epoch_ms_history)),
+        "epoch_ms_median": float(np.median(epoch_ms_history)),
+    }
+    state.history = history
+    state.metrics = final_metrics
     print(f"\n{'=' * 65}")
     print(f"  Strategy     : {fitness_strategy!r}")
     print(f"  Test Accuracy: {test_acc:.4f}")
@@ -288,58 +359,105 @@ def train(
         )
     print(f"{'=' * 65}\n")
 
+    if save_dir is not None:
+        _save_run_artifacts(Path(save_dir), state, final_metrics, history)
+
     return state
+
+
+def _json_safe(value):
+    if isinstance(value, dict):
+        return {key: _json_safe(val) for key, val in value.items()}
+    if isinstance(value, list):
+        return [_json_safe(item) for item in value]
+    if isinstance(value, tuple):
+        return [_json_safe(item) for item in value]
+    if isinstance(value, np.generic):
+        return _json_safe(value.item())
+    if isinstance(value, float) and not np.isfinite(value):
+        return None
+    return value
+
+
+def _save_run_artifacts(
+    save_dir: Path,
+    state: MichiganESState,
+    metrics: dict[str, object],
+    history: list[dict[str, object]],
+) -> None:
+    save_dir.mkdir(parents=True, exist_ok=True)
+    stem = (
+        f"es_{metrics['strategy']}_"
+        f"data{metrics['data_id']}_"
+        f"seed{metrics['seed']}_"
+        f"epochs{metrics['epochs']}"
+    )
+    npz_path = save_dir / f"{stem}.npz"
+    json_path = save_dir / f"{stem}.json"
+
+    np.savez_compressed(
+        npz_path,
+        alpha=state.alpha,
+        L=state.L,
+        beta=state.beta,
+    )
+    with json_path.open("w", encoding="utf-8") as fh:
+        json.dump(
+            _json_safe({"metrics": metrics, "history": history}),
+            fh,
+            indent=2,
+            sort_keys=True,
+        )
+    print(f"Saved run artifacts: {npz_path} | {json_path}")
+
+
+def build_arg_parser() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(description="Train the Michigan-style ES MLP.")
+    parser.add_argument("--strategy", choices=["omp", "r2", "cfs"], default="omp")
+    parser.add_argument("--epochs", type=int, default=100)
+    parser.add_argument("--mu", type=int, default=50)
+    parser.add_argument("--offspring", type=int, default=350)
+    parser.add_argument("--sigma-init", type=float, default=0.3)
+    parser.add_argument("--gamma", type=float, default=0.3)
+    parser.add_argument("--data-id", type=int, default=59)
+    parser.add_argument("--data-name", default=None)
+    parser.add_argument("--data-version", type=int, default=1)
+    parser.add_argument("--test-size", type=float, default=0.2)
+    parser.add_argument("--data-home", default=".openml_cache")
+    parser.add_argument("--verbose", type=int, default=10)
+    parser.add_argument("--seed", type=int, default=42)
+    parser.add_argument("--save-dir", default=None)
+    parser.add_argument("--overfit", action="store_true")
+    parser.add_argument("--overfit-n-samples", type=int, default=60)
+    parser.add_argument("--overfit-mu", type=int, default=50)
+    parser.add_argument("--overfit-lambda", type=float, default=1e-8)
+    return parser
+
+
+def main() -> None:
+    args = build_arg_parser().parse_args()
+    train(
+        fitness_strategy=args.strategy,
+        epochs=args.epochs,
+        mu=args.mu,
+        n_offspring=args.offspring,
+        sigma_init=args.sigma_init,
+        gamma=args.gamma,
+        data_id=args.data_id,
+        data_name=args.data_name,
+        data_version=args.data_version,
+        test_size=args.test_size,
+        data_home=args.data_home,
+        verbose=args.verbose,
+        seed=args.seed,
+        overfit=args.overfit,
+        overfit_n_samples=args.overfit_n_samples,
+        overfit_mu=args.overfit_mu,
+        overfit_lambda=args.overfit_lambda,
+        save_dir=args.save_dir,
+    )
 
 
 # ─────────────────────────────────────────────────────────────────────────────
 if __name__ == "__main__":
-
-    # R2 ablation run: compare against the marginal-R² baseline.
-    train(
-        fitness_strategy = "r2",
-         epochs           = 100,
-         mu               = 50,
-         n_offspring      = 350,
-         sigma_init       = 0.3,
-         gamma            = 0.3,
-         data_id          = 150,
-         verbose          = 10,
-    )
-
-    # OMP primary run: sequential residual fitting (recommended).
-    train(
-        fitness_strategy = "omp",
-        epochs           = 100,
-        mu               = 50,
-        n_offspring      = 350,
-        sigma_init       = 0.3,
-        verbose          = 10,
-    )
-
-    # CFS ablation run: explicit relevance/redundancy subset merit.
-    train(
-        fitness_strategy = "cfs",
-        epochs           = 100,
-        mu               = 50,
-        n_offspring      = 350,
-        sigma_init       = 0.3,
-        verbose          = 10,
-    )
-
-    # ── Overfit benchmark (demonstrates memorisation capacity) ──────────
-    # print("\n" + "=" * 65)
-    # print("  OVERFIT BENCHMARK — forcing memorisation")
-    # print("=" * 65)
-    # train(
-    #     fitness_strategy  = "r2",   # overridden internally, kept for clarity
-    #     epochs            = 150,
-    #     mu                = 50,     # overridden internally by overfit_mu
-    #     n_offspring       = 350,
-    #     sigma_init        = 0.3,
-    #     verbose           = 10,
-    #     seed              = 42,
-    #     overfit           = True,
-    #     overfit_n_samples = 25,
-    #     overfit_mu        = 250,
-    #     overfit_lambda    = 1e-8,
-    # )
+    main()

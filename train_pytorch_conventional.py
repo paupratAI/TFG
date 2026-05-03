@@ -117,7 +117,11 @@ def train_pytorch_mlp(
     early_stopping_patience: int = 45,
     lr_patience: int = 12,
     trials: int = 3,
-    data_id: int = 150,
+    data_id: int = 59,
+    data_name: str | None = None,
+    data_version: int = 1,
+    test_size: float = 0.2,
+    data_home: str | None = ".openml_cache",
     verbose: int = 10,
     seed: int = 42,
     device: str | None = None,
@@ -128,13 +132,29 @@ def train_pytorch_mlp(
 
     Returns a dictionary with train/test accuracy and elapsed time.
     """
+    if epochs < 1:
+        raise ValueError("epochs must be >= 1.")
+    if trials < 1:
+        raise ValueError("trials must be >= 1.")
+    if batch_size < 1:
+        raise ValueError("batch_size must be >= 1.")
+    if verbose < 1:
+        raise ValueError("verbose must be >= 1.")
+
     set_global_seed(seed)
 
     if device is None:
         device = "cuda" if torch.cuda.is_available() else "cpu"
     dev = torch.device(device)
 
-    X_tr_all, X_te, y_tr_all, y_te = load_dataset(data_id=data_id, seed=seed)
+    X_tr_all, X_te, y_tr_all, y_te = load_dataset(
+        data_id=data_id,
+        data_name=data_name,
+        version=data_version,
+        test_size=test_size,
+        seed=seed,
+        data_home=data_home,
+    )
     input_dim = X_tr_all.shape[1]
 
     # Hold out validation data from the training split for model selection.
@@ -322,7 +342,7 @@ def train_pytorch_mlp(
 
 
 def run_experiments_select_best(
-    data_id: int = 150,
+    data_id: int = 59,
     seed: int = 42,
     verbose: int = 10,
     device: str | None = None,
@@ -340,10 +360,13 @@ def run_experiments_select_best(
         "batch_size": 64,
         "dropout": 0.10,
         "val_size": 0.20,
+        "test_size": 0.20,
         "early_stopping_patience": 40,
         "lr_patience": 10,
         "trials": 3,
         "data_id": data_id,
+        "data_name": None,
+        "data_version": 1,
         "verbose": verbose,
         "seed": seed,
         "device": device,
@@ -359,10 +382,13 @@ def run_experiments_select_best(
             "batch_size": 64,
             "dropout": 0.20,
             "val_size": 0.20,
+            "test_size": 0.20,
             "early_stopping_patience": 45,
             "lr_patience": 12,
             "trials": 3,
             "data_id": data_id,
+            "data_name": None,
+            "data_version": 1,
             "verbose": verbose,
             "seed": seed,
             "device": device,
@@ -376,10 +402,13 @@ def run_experiments_select_best(
             "batch_size": 64,
             "dropout": 0.25,
             "val_size": 0.20,
+            "test_size": 0.20,
             "early_stopping_patience": 50,
             "lr_patience": 12,
             "trials": 3,
             "data_id": data_id,
+            "data_name": None,
+            "data_version": 1,
             "verbose": verbose,
             "seed": seed + 100,
             "device": device,
@@ -393,10 +422,13 @@ def run_experiments_select_best(
             "batch_size": 32,
             "dropout": 0.20,
             "val_size": 0.20,
+            "test_size": 0.20,
             "early_stopping_patience": 45,
             "lr_patience": 10,
             "trials": 3,
             "data_id": data_id,
+            "data_name": None,
+            "data_version": 1,
             "verbose": verbose,
             "seed": seed + 200,
             "device": device,
@@ -410,10 +442,13 @@ def run_experiments_select_best(
             "batch_size": 64,
             "dropout": 0.15,
             "val_size": 0.20,
+            "test_size": 0.20,
             "early_stopping_patience": 55,
             "lr_patience": 14,
             "trials": 4,
             "data_id": data_id,
+            "data_name": None,
+            "data_version": 1,
             "verbose": verbose,
             "seed": seed + 300,
             "device": device,
@@ -475,7 +510,7 @@ def run_experiments_select_best(
 
 if __name__ == "__main__":
     run_experiments_select_best(
-        data_id=150,
+        data_id=59,
         verbose=10,
         seed=42,
         device=None,

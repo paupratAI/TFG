@@ -3,3 +3,5 @@ oldmain.py
 oldgcv.py
 
 .DS_Store
+runs/
+.openml_cache/
