@@ -2,8 +2,8 @@
 train_ga_conventional.py — Conventional Genetic Algorithm baseline.
 
 This script mirrors the prototype's objective (binary classification with a
-tanh hidden layer and analytic Ridge+GCV output solve), but uses a standard
-GA instead of a Michigan-style ES.
+tanh hidden layer and an L2-regularised logistic output layer), but uses a
+standard GA instead of a Michigan-style ES.
 
 Individual representation
 -------------------------
@@ -30,7 +30,7 @@ import numpy as np
 from sklearn.metrics import accuracy_score
 
 from data import load_dataset
-from gcv import compute_ridge_gcv
+from logistic_output import compute_logistic_l2, predict_pm1
 
 
 def compute_hidden_activations(chromosome: np.ndarray, X: np.ndarray) -> np.ndarray:
@@ -55,28 +55,28 @@ def evaluate_individual(
     chromosome: np.ndarray,
     X_tr: np.ndarray,
     y_tr: np.ndarray,
-) -> tuple[float, float, np.ndarray, float]:
+) -> tuple[float, float, np.ndarray, float, float]:
     """
-    Evaluate one individual with the same output-layer solver as the prototype.
+    Evaluate one individual with the same logistic output solver as the prototype.
 
     Returns
     -------
     fitness     : scalar fitness (higher is better)
     train_acc   : training accuracy
-    beta        : output weights from Ridge+GCV
-    best_gcv    : best GCV score
+    beta        : output weights from logistic L2 fitting
+    log_loss    : unregularised binary cross-entropy
+    objective   : penalised binary cross-entropy
     """
     Phi = compute_hidden_activations(chromosome, X_tr)
     Phi_bias = np.c_[Phi, np.ones(len(y_tr))]
 
-    _, beta, best_gcv = compute_ridge_gcv(Phi_bias, y_tr)
-    y_hat = Phi_bias @ beta
-    train_pred = np.where(y_hat.ravel() > 0, 1.0, -1.0)
+    _, beta, log_loss, objective = compute_logistic_l2(Phi_bias, y_tr)
+    train_pred = predict_pm1(Phi_bias, beta)
     train_acc = accuracy_score(y_tr.ravel(), train_pred)
 
-    # Maximise accuracy while softly preferring better (smaller) GCV.
-    fitness = float(train_acc - 0.01 * np.log1p(best_gcv))
-    return fitness, float(train_acc), beta, float(best_gcv)
+    # Maximise accuracy while softly preferring better calibrated probabilities.
+    fitness = float(train_acc - 0.01 * np.log1p(log_loss))
+    return fitness, float(train_acc), beta, float(log_loss), float(objective)
 
 
 def tournament_select(
@@ -173,7 +173,8 @@ def train_conventional_ga(
     best_fitness = -np.inf
     best_chromosome = population[0].copy()
     best_beta = None
-    best_gcv = np.inf
+    best_log_loss = np.inf
+    best_objective = np.inf
     best_train_acc = 0.0
     history: list[dict[str, float | int]] = []
 
@@ -186,14 +187,16 @@ def train_conventional_ga(
     for gen in range(1, generations + 1):
         fitness = np.empty(pop_size, dtype=np.float64)
         train_acc = np.empty(pop_size, dtype=np.float64)
-        gcv_vals = np.empty(pop_size, dtype=np.float64)
+        log_loss_vals = np.empty(pop_size, dtype=np.float64)
+        objective_vals = np.empty(pop_size, dtype=np.float64)
         betas: list[np.ndarray] = []
 
         for i in range(pop_size):
-            fi, acci, bi, gcvi = evaluate_individual(population[i], X_tr, y_tr)
+            fi, acci, bi, logi, obji = evaluate_individual(population[i], X_tr, y_tr)
             fitness[i] = fi
             train_acc[i] = acci
-            gcv_vals[i] = gcvi
+            log_loss_vals[i] = logi
+            objective_vals[i] = obji
             betas.append(bi)
 
         gen_best = int(np.argmax(fitness))
@@ -201,7 +204,8 @@ def train_conventional_ga(
             best_fitness = float(fitness[gen_best])
             best_chromosome = population[gen_best].copy()
             best_beta = betas[gen_best].copy()
-            best_gcv = float(gcv_vals[gen_best])
+            best_log_loss = float(log_loss_vals[gen_best])
+            best_objective = float(objective_vals[gen_best])
             best_train_acc = float(train_acc[gen_best])
 
         history.append(
@@ -209,7 +213,8 @@ def train_conventional_ga(
                 "generation": gen,
                 "best_fitness": float(fitness[gen_best]),
                 "train_acc": float(train_acc[gen_best]),
-                "gcv": float(gcv_vals[gen_best]),
+                "log_loss": float(log_loss_vals[gen_best]),
+                "objective": float(objective_vals[gen_best]),
             }
         )
 
@@ -218,7 +223,7 @@ def train_conventional_ga(
                 f"Gen {gen:4d}/{generations}  |  "
                 f"Best fitness={fitness[gen_best]:.5f}  |  "
                 f"Train Acc={train_acc[gen_best]:.4f}  |  "
-                f"GCV={gcv_vals[gen_best]:.5f}"
+                f"LogLoss={log_loss_vals[gen_best]:.5f}"
             )
 
         # --- Next generation ---
@@ -244,17 +249,18 @@ def train_conventional_ga(
     # Final test evaluation with best individual found during search.
     if best_beta is None:
         # Defensive fallback (should not happen).
-        _, _, best_beta, best_gcv = evaluate_individual(best_chromosome, X_tr, y_tr)
+        _, _, best_beta, best_log_loss, best_objective = evaluate_individual(
+            best_chromosome, X_tr, y_tr
+        )
 
     Phi_test = compute_hidden_activations(best_chromosome, X_te)
     Phi_test_bias = np.c_[Phi_test, np.ones(len(y_te))]
-    test_hat = Phi_test_bias @ best_beta
-    y_test_pred = np.where(test_hat.ravel() > 0, 1.0, -1.0)
+    y_test_pred = predict_pm1(Phi_test_bias, best_beta)
     test_acc = accuracy_score(y_te.ravel(), y_test_pred)
 
     print(f"\n{'=' * 65}")
     print(f"  Best Train Acc: {best_train_acc:.4f}")
-    print(f"  Best GCV      : {best_gcv:.6f}")
+    print(f"  Best LogLoss  : {best_log_loss:.6f}")
     print(f"  Test Accuracy : {test_acc:.4f}")
     print(f"  Total time    : {elapsed:.2f} s")
     print(f"{'=' * 65}\n")
@@ -262,7 +268,8 @@ def train_conventional_ga(
     return {
         "best_fitness": best_fitness,
         "best_train_acc": best_train_acc,
-        "best_gcv": best_gcv,
+        "best_log_loss": best_log_loss,
+        "best_objective": best_objective,
         "test_acc": float(test_acc),
         "elapsed_seconds": float(elapsed),
         "best_chromosome": best_chromosome,

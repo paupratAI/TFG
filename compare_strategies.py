@@ -141,7 +141,7 @@ def save_json(results: dict[str, object], output_path: Path) -> None:
 
 
 def print_summary(results: dict[str, object]) -> None:
-    print("\n| Strategy | Final Train Acc | Validation Acc | Test Acc | Final GCV |")
+    print("\n| Strategy | Final Train Acc | Validation Acc | Test Acc | Final LogLoss |")
     print("|---|---:|---:|---:|---:|")
     for strategy, payload in results.items():
         metrics = payload["metrics"]
@@ -150,7 +150,7 @@ def print_summary(results: dict[str, object]) -> None:
             f"{float(metrics['final_train_acc']):.4f} | "
             f"{float(metrics['validation_acc']):.4f} | "
             f"{float(metrics['test_acc']):.4f} | "
-            f"{float(metrics['final_gcv']):.6f} |"
+            f"{float(metrics['final_log_loss']):.6f} |"
         )
 
 

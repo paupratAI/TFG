@@ -5,7 +5,7 @@ This script orchestrates the full training procedure:
   1. Load and preprocess data.
   2. Initialise the ES population (one neuron per individual).
   3. Each generation: mutate -> activate -> select -> solve output layer.
-  4. Report training accuracy, GCV score, and sigma at regular intervals.
+  4. Report training accuracy, logistic log-loss, and sigma at regular intervals.
   5. Report final test accuracy.
 
 Usage
@@ -17,9 +17,9 @@ Performance notes
 - r2_fitness is called ONCE per generation over the full pool (pool_r2).
   The stagnation-reset block reuses pool_r2[best_idx] instead of making
   a second r2_fitness call over Phi_surv.
-- adaptive_lambda_grid has been removed: compute_ridge_gcv now builds the
-  adaptive grid internally from the singular values it already computes,
-  so no second SVD is ever issued per generation.
+- The output layer is a logistic classifier.  Its linear score is a logit,
+  so the model returns calibrated binary probabilities instead of a raw
+  regression score.
 """
 
 import argparse
@@ -39,7 +39,7 @@ from selection import (
     cfs_selection,
     cfs_auc_selection,
 )
-from gcv       import compute_ridge_gcv
+from logistic_output import compute_logistic_l2, predict_pm1, predict_proba
 
 
 def train(
@@ -79,14 +79,15 @@ def train(
                     'cfs' uses subset merit balancing relevance/redundancy.
                     'cfs_auc' uses AUC relevance + Spearman redundancy.
 
-        Solve    ->  fit the output layer analytically using Ridge + GCV on
-                     the mu survivors.  No gradient descent is needed here.
+        Solve    ->  fit an L2-regularised logistic output layer on the mu
+                     survivors.  The output score is interpreted as a logit.
 
-    Note on the bias column
-    -----------------------
+    Note on the bias column and probabilities
+    -----------------------------------------
     A column of ones is appended to the activation matrix ONLY in the Solve
-    step, immediately before the Ridge call.  All prior steps (fitness scoring,
-    selection) work on raw activations without the bias column.
+    step, immediately before the logistic fit.  All prior steps (fitness
+    scoring, selection) work on raw activations without the bias column.
+    The fitted model returns p(y=+1|X); p(y=-1|X) is 1-p.
 
     Parameters
     ----------
@@ -105,10 +106,10 @@ def train(
     data_home        : Local OpenML cache directory.
     verbose          : Print a log line every this many generations.
     seed             : Global random seed.
-    overfit          : If True, enable memorisation demo (subset train, tiny ridge).
+    overfit          : If True, enable memorisation demo (subset train, tiny L2 penalty).
     overfit_n_samples: Training rows when overfit=True (capped by available).
     overfit_mu       : Population size when overfit=True (replaces mu).
-    overfit_lambda   : Fixed Ridge lambda when overfit=True (bypasses GCV).
+    overfit_lambda   : Fixed logistic L2 penalty when overfit=True.
     save_dir         : Optional directory where model arrays and JSON metadata are saved.
 
     Returns
@@ -182,7 +183,7 @@ def train(
         f" | overfit={'ON' if overfit else 'off'}\n"
         + "-" * 65
     )
-    gcv_history: list[float] = []
+    objective_history: list[float] = []
     select_ms_history: list[float] = []
     epoch_ms_history: list[float] = []
     history: list[dict[str, float | int | str]] = []
@@ -200,7 +201,7 @@ def train(
 
         # --- Step 2: Activate ---
         # Phi_pool columns are neurons, rows are training samples.
-        # No bias column here -- it is added only before the Ridge solve.
+        # No bias column here -- it is added only before the logistic output fit.
         Phi_pool = compute_activations(pool_alpha, X_tr)   # (m, P)
 
         # Compute r2 ONCE for the full pool; reused by selection and elitism.
@@ -264,34 +265,33 @@ def train(
         state.alpha = pool_alpha[best_idx].copy()   # (mu, D)
         state.L     = pool_L[best_idx].copy()       # (mu, D, D)
 
-        # --- Step 4: Solve output layer (Ridge + GCV) ---
-        # Append the bias column here, right before the Ridge solve.
-        # compute_ridge_gcv builds the adaptive lambda grid internally from
-        # the singular values it computes — no separate adaptive_lambda_grid call.
+        # --- Step 4: Solve output layer (Logistic + L2) ---
+        # Append the bias column here, right before fitting the logistic output.
         Phi_surv      = Phi_pool[:, best_idx]                   # (m, mu)
         Phi_surv_bias = np.c_[Phi_surv, np.ones(len(y_tr))]    # (m, mu+1)
 
-        best_lam, best_beta, best_gcv = compute_ridge_gcv(
+        best_lam, best_beta, best_log_loss, best_objective = compute_logistic_l2(
             Phi_surv_bias, y_tr,
             lambda_override=(overfit_lambda if overfit else None),
         )
         state.beta = best_beta   # (mu+1, 1)
-        stagnation_metric = -float(np.max(pool_r2[best_idx])) if overfit else best_gcv
-        gcv_history.append(stagnation_metric)
+        stagnation_metric = -float(np.max(pool_r2[best_idx])) if overfit else best_objective
+        objective_history.append(stagnation_metric)
 
-        y_hat_tr  = Phi_surv_bias @ state.beta
+        y_proba_tr = predict_proba(Phi_surv_bias, state.beta)
+        y_pred_tr = predict_pm1(Phi_surv_bias, state.beta)
         train_acc = float(accuracy_score(
             y_tr.ravel(),
-            np.where(y_hat_tr.ravel() > 0, 1.0, -1.0)
+            y_pred_tr
         ))
         mean_sigma = float(state.L[:, np.arange(state.D), np.arange(state.D)].mean())
 
         # --- Stagnation detection and sigma reset ---
         reset_count = 0
         if not overfit:
-            if len(gcv_history) >= STAGNATION_WINDOW:
-                recent_improvement = gcv_history[-STAGNATION_WINDOW] - gcv_history[-1]
-                relative_improvement = recent_improvement / (abs(gcv_history[-STAGNATION_WINDOW]) + 1e-12)
+            if len(objective_history) >= STAGNATION_WINDOW:
+                recent_improvement = objective_history[-STAGNATION_WINDOW] - objective_history[-1]
+                relative_improvement = recent_improvement / (abs(objective_history[-STAGNATION_WINDOW]) + 1e-12)
                 if relative_improvement < STAGNATION_THRESHOLD:
                     # Reuse pool_r2[best_idx] — same as r2 scores for survivors.
                     # No second r2_fitness call needed.
@@ -316,9 +316,11 @@ def train(
             {
                 "epoch": epoch,
                 "strategy": effective_strategy,
-                "gcv": float(best_gcv) if np.isfinite(best_gcv) else float("nan"),
+                "log_loss": float(best_log_loss),
+                "objective": float(best_objective),
                 "lambda": float(best_lam),
                 "train_acc": train_acc,
+                "train_mean_positive_proba": float(np.mean(y_proba_tr)),
                 "sigma_mean": mean_sigma,
                 "select_ms": float(select_ms),
                 "epoch_ms": float(epoch_ms),
@@ -328,7 +330,8 @@ def train(
         if epoch % verbose == 0 or epoch == 1:
             print(
                 f"Gen {epoch:4d}/{epochs}  |  "
-                f"GCV={best_gcv:.5f}  |  "
+                f"LogLoss={best_log_loss:.5f}  |  "
+                f"Obj={best_objective:.5f}  |  "
                 f"lambda={best_lam:.1e}  |  "
                 f"Train Acc={train_acc:.4f}  |  "
                 f"sigma_mean={mean_sigma:.5f}  |  "
@@ -339,19 +342,21 @@ def train(
     # --- Final test evaluation ---
     Phi_test      = compute_activations(state.alpha, X_te)       # (m_te, mu)
     Phi_test_bias = np.c_[Phi_test, np.ones(len(y_te))]         # (m_te, mu+1)
-    test_hat      = Phi_test_bias @ state.beta
+    test_proba    = predict_proba(Phi_test_bias, state.beta)
+    test_pred     = predict_pm1(Phi_test_bias, state.beta)
     test_acc      = float(accuracy_score(
         y_te.ravel(),
-        np.where(test_hat.ravel() > 0, 1.0, -1.0)
+        test_pred
     ))
     val_acc = None
     if X_val is not None and y_val is not None:
         Phi_val = compute_activations(state.alpha, X_val)
         Phi_val_bias = np.c_[Phi_val, np.ones(len(y_val))]
-        val_hat = Phi_val_bias @ state.beta
+        val_proba = predict_proba(Phi_val_bias, state.beta)
+        val_pred = predict_pm1(Phi_val_bias, state.beta)
         val_acc = float(accuracy_score(
             y_val.ravel(),
-            np.where(val_hat.ravel() > 0, 1.0, -1.0)
+            val_pred
         ))
     total_elapsed = time.perf_counter() - total_t0
     final_metrics = {
@@ -369,8 +374,10 @@ def train(
         "final_train_acc": history[-1]["train_acc"],
         "validation_acc": val_acc,
         "test_acc": test_acc,
-        "final_gcv": history[-1]["gcv"],
+        "final_log_loss": history[-1]["log_loss"],
+        "final_objective": history[-1]["objective"],
         "final_lambda": history[-1]["lambda"],
+        "test_mean_positive_proba": float(np.mean(test_proba)),
         "elapsed_seconds": float(total_elapsed),
         "select_ms_mean": float(np.mean(select_ms_history)),
         "select_ms_median": float(np.median(select_ms_history)),

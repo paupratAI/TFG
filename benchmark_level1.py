@@ -23,7 +23,7 @@ from sklearn.metrics import accuracy_score
 
 from core_es import compute_activations
 from data import load_dataset
-from gcv import compute_ridge_gcv
+from logistic_output import binary_log_loss_from_proba, labels_to_binary, predict_pm1, predict_proba
 from train import train
 from train_ga_conventional import train_conventional_ga
 
@@ -47,7 +47,7 @@ def evaluate_es_state(
     seed: int,
 ) -> tuple[float, float, float]:
     """
-    Compute ES final test accuracy, train accuracy, and GCV from final state.
+    Compute ES final test accuracy, train accuracy, and logistic log-loss.
     """
     X_tr, X_te, y_tr, y_te = load_dataset(
         data_id=data_id,
@@ -57,21 +57,17 @@ def evaluate_es_state(
 
     Phi_tr = compute_activations(state.alpha, X_tr)
     Phi_tr_bias = np.c_[Phi_tr, np.ones(len(y_tr))]
-    y_hat_tr = Phi_tr_bias @ state.beta
-    train_pred = np.where(y_hat_tr.ravel() > 0, 1.0, -1.0)
+    train_proba = predict_proba(Phi_tr_bias, state.beta)
+    train_pred = predict_pm1(Phi_tr_bias, state.beta)
     train_acc = float(accuracy_score(y_tr.ravel(), train_pred))
-
-    # Recompute best lambda/GCV on final hidden representation for reporting.
-    _, _, best_gcv = compute_ridge_gcv(Phi_tr_bias, y_tr)
-    best_gcv = float(best_gcv)
+    log_loss = binary_log_loss_from_proba(labels_to_binary(y_tr), train_proba)
 
     Phi_te = compute_activations(state.alpha, X_te)
     Phi_te_bias = np.c_[Phi_te, np.ones(len(y_te))]
-    y_hat_te = Phi_te_bias @ state.beta
-    test_pred = np.where(y_hat_te.ravel() > 0, 1.0, -1.0)
+    test_pred = predict_pm1(Phi_te_bias, state.beta)
     test_acc = float(accuracy_score(y_te.ravel(), test_pred))
 
-    return test_acc, train_acc, best_gcv
+    return test_acc, train_acc, log_loss
 
 
 def _mean_std(values: list[float]) -> str:
@@ -107,7 +103,7 @@ def run_benchmark() -> None:
                     seed=seed,
                 )
             es_elapsed = time.perf_counter() - es_t0
-            es_test_acc, es_best_train_acc, es_best_gcv = evaluate_es_state(
+            es_test_acc, es_best_train_acc, es_best_log_loss = evaluate_es_state(
                 es_state, data_id=data_id, data_name=data_name, seed=seed
             )
 
@@ -136,11 +132,11 @@ def run_benchmark() -> None:
                     "es_time": es_elapsed,
                     "es_test_acc": es_test_acc,
                     "es_best_train_acc": es_best_train_acc,
-                    "es_best_gcv": es_best_gcv,
+                    "es_best_log_loss": es_best_log_loss,
                     "ga_time": ga_elapsed,
                     "ga_test_acc": float(ga_out["test_acc"]),
                     "ga_best_train_acc": float(ga_out["best_train_acc"]),
-                    "ga_best_gcv": float(ga_out["best_gcv"]),
+                    "ga_best_log_loss": float(ga_out["best_log_loss"]),
                 }
             )
 
@@ -175,19 +171,19 @@ def run_benchmark() -> None:
         )
 
     # ------------------------------------------------------------
-    # Secondary table: Best Train Accuracy and Best GCV
+    # Secondary table: Best Train Accuracy and Best LogLoss
     # ------------------------------------------------------------
     print()
-    print("| Dataset (OpenML ID) | ES Best Train Acc | ES Best GCV | GA Best Train Acc | GA Best GCV |")
+    print("| Dataset (OpenML ID) | ES Best Train Acc | ES Best LogLoss | GA Best Train Acc | GA Best LogLoss |")
     print("|---|---:|---:|---:|---:|")
     for r in rows:
         runs = r["runs"]
         print(
             f"| {r['dataset_name']} ({r['dataset_id']}) | "
             f"{_mean_std([float(run['es_best_train_acc']) for run in runs])} | "
-            f"{_mean_std([float(run['es_best_gcv']) for run in runs])} | "
+            f"{_mean_std([float(run['es_best_log_loss']) for run in runs])} | "
             f"{_mean_std([float(run['ga_best_train_acc']) for run in runs])} | "
-            f"{_mean_std([float(run['ga_best_gcv']) for run in runs])} |"
+            f"{_mean_std([float(run['ga_best_log_loss']) for run in runs])} |"
         )
 
 

@@ -30,8 +30,8 @@ def load_dataset(
     Fitting preprocessing on the full dataset before splitting would leak
     test-set statistics into the training process.
 
-    Labels are mapped to {-1, +1} for compatibility with the Ridge
-    regression output layer.
+    Labels are mapped to {-1, +1}.  The logistic output layer internally maps
+    them to {0, 1} with +1 as the positive class.
 
     Parameters
     ----------

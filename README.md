@@ -3,7 +3,8 @@
 This repository contains a binary-classification prototype based on a
 Michigan-style Evolution Strategy (ES) for the hidden layer of an MLP.
 Each ES individual represents one hidden neuron. The output layer is solved
-analytically with Ridge Regression and Generalised Cross-Validation (GCV).
+as an L2-regularised logistic classifier.  The final score is a logit, so the
+model returns p(y=+1|X) and p(y=-1|X)=1-p(y=+1|X).
 
 ## Main Flow
 
@@ -13,7 +14,8 @@ analytically with Ridge Regression and Generalised Cross-Validation (GCV).
 2. `core_es.py` initialises and mutates the Michigan-style population.
 3. `selection.py` selects the hidden neurons that survive each generation.
    The default strategy is OMP-style residual selection.
-4. `gcv.py` solves the output layer with Ridge+GCV.
+4. `logistic_output.py` fits the output layer with logistic loss and L2
+   regularisation.
 5. `train.py` orchestrates the full loop and can save model arrays plus a JSON
    trace of metrics.
 

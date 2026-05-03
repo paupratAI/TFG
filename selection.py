@@ -81,12 +81,13 @@ def omp_residual_selection(
     4. Update the residual:    r <- r - (q . r) * q
        After this step, r is perpendicular to the direction i* just captured.
 
-    Cost per generation: O(mu * m * P)  --  no Ridge solve inside the loop.
+    Cost per generation: O(mu * m * P)  --  no output-layer solve inside the loop.
 
     Parameters
     ----------
     Phi : (m, P)       activation matrix for all P candidate neurons.
-                       Must NOT include a bias column (added later before Ridge).
+                       Must NOT include a bias column (added later before the
+                       logistic output fit).
     y   : (m,) or (m,1) target labels.
     mu  : number of neurons to select.
 
@@ -459,7 +460,8 @@ def cfs_auc_selection(
 
       - r_cf = (2*AUC(phi_i, y) - 1)^2
         AUC=0.5 maps to 0, while AUC=0 or AUC=1 both map to 1 because an
-        inverted neuron can still be useful to the signed Ridge output layer.
+        inverted neuron can still be useful because the logistic output layer
+        can assign it a negative coefficient.
 
       - r_ff = Spearman(phi_i, phi_j)^2
         Redundancy is rank-based, so monotonic duplicates are penalised even
