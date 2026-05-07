@@ -1,5 +1,5 @@
 """
-logistic_output.py — L2-regularised logistic output layer.
+logistic_output.py — Unregularised logistic output layer.
 
 This module replaces the Ridge+GCV output solve used by the original prototype.
 Hidden activations are still produced by the evolved tanh neurons, but the final
@@ -8,8 +8,9 @@ linear score is interpreted as a logit:
     p(y=+1 | X) = sigmoid(Phi @ beta)
     p(y=-1 | X) = 1 - p(y=+1 | X)
 
-The output weights are fitted with Newton/IRLS on binary cross-entropy plus an
-L2 penalty.  The bias column is not regularised.
+The output weights are fitted with Newton/IRLS on binary cross-entropy.  There
+is no regularisation parameter and no GCV-style lambda selection in this
+formulation.
 """
 
 from __future__ import annotations
@@ -64,32 +65,29 @@ def predict_pm1(Phi: np.ndarray, beta: np.ndarray) -> np.ndarray:
 def _fit_logistic_newton(
     Phi: np.ndarray,
     y01: np.ndarray,
-    lam: float,
     max_iter: int,
     tol: float,
+    damping: float,
 ) -> tuple[np.ndarray, float, float]:
     """
-    Fit one L2-regularised logistic model with Newton updates.
+    Fit one unregularised logistic model with Newton updates.
 
-    Returns beta, unregularised mean log-loss, and penalised mean objective.
+    Returns beta, mean log-loss, and final Newton step norm.
     """
     Phi64 = np.asarray(Phi, dtype=np.float64)
     y = np.asarray(y01, dtype=np.float64).reshape(-1, 1)
-    m, H = Phi64.shape
+    _, H = Phi64.shape
 
     beta = np.zeros((H, 1), dtype=np.float64)
-    penalty_mask = np.ones((H, 1), dtype=np.float64)
-    penalty_mask[-1, 0] = 0.0  # do not regularise the output bias
-    penalty_diag = penalty_mask.ravel()
 
     for _ in range(max_iter):
         logits = Phi64 @ beta
         proba = sigmoid(logits)
         weights = np.maximum((proba * (1.0 - proba)).ravel(), 1e-9)
 
-        grad = Phi64.T @ (proba - y) + lam * penalty_mask * beta
+        grad = Phi64.T @ (proba - y)
         hessian = (Phi64.T * weights) @ Phi64
-        hessian += np.diag(lam * penalty_diag + 1e-8)
+        hessian += np.eye(H, dtype=np.float64) * damping
 
         try:
             step = np.linalg.solve(hessian, grad)
@@ -102,22 +100,18 @@ def _fit_logistic_newton(
 
     proba = predict_proba(Phi64, beta)
     log_loss = binary_log_loss_from_proba(y, proba)
-    penalty = 0.5 * lam * float(np.sum((penalty_mask * beta) ** 2)) / m
-    objective = log_loss + penalty
-    return beta, log_loss, objective
+    return beta, log_loss, float(np.linalg.norm(step))
 
 
-def compute_logistic_l2(
-    Phi              : np.ndarray,
-    Y                : np.ndarray,
-    lambda_candidates: list[float] | None = None,
-    n_lambda_points  : int = 20,
-    lambda_override  : float | None = None,
-    max_iter         : int = 50,
-    tol              : float = 1e-8,
-) -> tuple[float, np.ndarray, float, float]:
+def compute_logistic_output(
+    Phi     : np.ndarray,
+    Y       : np.ndarray,
+    max_iter: int = 50,
+    tol     : float = 1e-8,
+    damping : float = 1e-8,
+) -> tuple[np.ndarray, float, float]:
     """
-    Fit the logistic output layer and choose an L2 penalty.
+    Fit the unregularised logistic output layer.
 
     Parameters
     ----------
@@ -126,10 +120,9 @@ def compute_logistic_l2(
 
     Returns
     -------
-    best_lambda    : selected L2 penalty.
-    best_beta      : (H,1) output weights.
-    best_log_loss  : mean binary cross-entropy without the penalty term.
-    best_objective : mean binary cross-entropy plus L2 penalty.
+    beta      : (H,1) output weights.
+    log_loss  : mean binary cross-entropy.
+    step_norm : norm of the final Newton step, useful as a convergence trace.
     """
     if Phi.ndim != 2:
         raise ValueError(f"Phi must be 2-D, got shape {Phi.shape}.")
@@ -139,36 +132,11 @@ def compute_logistic_l2(
             f"Row mismatch: Phi has {Phi.shape[0]} rows but Y has {y01.shape[0]} rows."
         )
 
-    if lambda_override is not None:
-        candidates = [float(lambda_override)]
-    elif lambda_candidates is not None:
-        candidates = [float(lam) for lam in lambda_candidates if lam >= 0.0]
-    else:
-        candidates = list(np.logspace(-6, 2, n_lambda_points))
-
-    if not candidates:
-        raise ValueError("lambda_candidates must contain at least one non-negative value.")
-
-    best_lambda = candidates[0]
-    best_beta: np.ndarray | None = None
-    best_log_loss = np.inf
-    best_objective = np.inf
-
-    for lam in candidates:
-        beta, log_loss, objective = _fit_logistic_newton(
-            Phi,
-            y01,
-            lam=lam,
-            max_iter=max_iter,
-            tol=tol,
-        )
-        if objective < best_objective:
-            best_lambda = lam
-            best_beta = beta
-            best_log_loss = log_loss
-            best_objective = objective
-
-    if best_beta is None:
-        raise RuntimeError("Failed to fit logistic output layer.")
-
-    return best_lambda, best_beta, best_log_loss, best_objective
+    beta, log_loss, step_norm = _fit_logistic_newton(
+        Phi,
+        y01,
+        max_iter=max_iter,
+        tol=tol,
+        damping=damping,
+    )
+    return beta, log_loss, step_norm

@@ -2,7 +2,7 @@
 train_ga_conventional.py — Conventional Genetic Algorithm baseline.
 
 This script mirrors the prototype's objective (binary classification with a
-tanh hidden layer and an L2-regularised logistic output layer), but uses a
+tanh hidden layer and an unregularised logistic output layer), but uses a
 standard GA instead of a Michigan-style ES.
 
 Individual representation
@@ -30,7 +30,7 @@ import numpy as np
 from sklearn.metrics import accuracy_score
 
 from data import load_dataset
-from logistic_output import compute_logistic_l2, predict_pm1
+from logistic_output import compute_logistic_output, predict_pm1
 
 
 def compute_hidden_activations(chromosome: np.ndarray, X: np.ndarray) -> np.ndarray:
@@ -63,20 +63,20 @@ def evaluate_individual(
     -------
     fitness     : scalar fitness (higher is better)
     train_acc   : training accuracy
-    beta        : output weights from logistic L2 fitting
-    log_loss    : unregularised binary cross-entropy
-    objective   : penalised binary cross-entropy
+    beta        : output weights from logistic fitting
+    log_loss    : binary cross-entropy
+    step_norm   : norm of the final Newton step
     """
     Phi = compute_hidden_activations(chromosome, X_tr)
     Phi_bias = np.c_[Phi, np.ones(len(y_tr))]
 
-    _, beta, log_loss, objective = compute_logistic_l2(Phi_bias, y_tr)
+    beta, log_loss, step_norm = compute_logistic_output(Phi_bias, y_tr)
     train_pred = predict_pm1(Phi_bias, beta)
     train_acc = accuracy_score(y_tr.ravel(), train_pred)
 
-    # Maximise accuracy while softly preferring better calibrated probabilities.
+    # Maximise accuracy while softly preferring lower logistic log-loss.
     fitness = float(train_acc - 0.01 * np.log1p(log_loss))
-    return fitness, float(train_acc), beta, float(log_loss), float(objective)
+    return fitness, float(train_acc), beta, float(log_loss), float(step_norm)
 
 
 def tournament_select(
@@ -174,7 +174,7 @@ def train_conventional_ga(
     best_chromosome = population[0].copy()
     best_beta = None
     best_log_loss = np.inf
-    best_objective = np.inf
+    best_step_norm = np.inf
     best_train_acc = 0.0
     history: list[dict[str, float | int]] = []
 
@@ -188,15 +188,15 @@ def train_conventional_ga(
         fitness = np.empty(pop_size, dtype=np.float64)
         train_acc = np.empty(pop_size, dtype=np.float64)
         log_loss_vals = np.empty(pop_size, dtype=np.float64)
-        objective_vals = np.empty(pop_size, dtype=np.float64)
+        step_norm_vals = np.empty(pop_size, dtype=np.float64)
         betas: list[np.ndarray] = []
 
         for i in range(pop_size):
-            fi, acci, bi, logi, obji = evaluate_individual(population[i], X_tr, y_tr)
+            fi, acci, bi, logi, stepi = evaluate_individual(population[i], X_tr, y_tr)
             fitness[i] = fi
             train_acc[i] = acci
             log_loss_vals[i] = logi
-            objective_vals[i] = obji
+            step_norm_vals[i] = stepi
             betas.append(bi)
 
         gen_best = int(np.argmax(fitness))
@@ -205,7 +205,7 @@ def train_conventional_ga(
             best_chromosome = population[gen_best].copy()
             best_beta = betas[gen_best].copy()
             best_log_loss = float(log_loss_vals[gen_best])
-            best_objective = float(objective_vals[gen_best])
+            best_step_norm = float(step_norm_vals[gen_best])
             best_train_acc = float(train_acc[gen_best])
 
         history.append(
@@ -214,7 +214,7 @@ def train_conventional_ga(
                 "best_fitness": float(fitness[gen_best]),
                 "train_acc": float(train_acc[gen_best]),
                 "log_loss": float(log_loss_vals[gen_best]),
-                "objective": float(objective_vals[gen_best]),
+                "newton_step_norm": float(step_norm_vals[gen_best]),
             }
         )
 
@@ -249,7 +249,7 @@ def train_conventional_ga(
     # Final test evaluation with best individual found during search.
     if best_beta is None:
         # Defensive fallback (should not happen).
-        _, _, best_beta, best_log_loss, best_objective = evaluate_individual(
+        _, _, best_beta, best_log_loss, best_step_norm = evaluate_individual(
             best_chromosome, X_tr, y_tr
         )
 
@@ -269,7 +269,7 @@ def train_conventional_ga(
         "best_fitness": best_fitness,
         "best_train_acc": best_train_acc,
         "best_log_loss": best_log_loss,
-        "best_objective": best_objective,
+        "best_newton_step_norm": best_step_norm,
         "test_acc": float(test_acc),
         "elapsed_seconds": float(elapsed),
         "best_chromosome": best_chromosome,

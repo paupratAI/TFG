@@ -3,7 +3,7 @@
 This repository contains a binary-classification prototype based on a
 Michigan-style Evolution Strategy (ES) for the hidden layer of an MLP.
 Each ES individual represents one hidden neuron. The output layer is solved
-as an L2-regularised logistic classifier.  The final score is a logit, so the
+as an unregularised logistic classifier. The final score is a logit, so the
 model returns p(y=+1|X) and p(y=-1|X)=1-p(y=+1|X).
 
 ## Main Flow
@@ -14,10 +14,16 @@ model returns p(y=+1|X) and p(y=-1|X)=1-p(y=+1|X).
 2. `core_es.py` initialises and mutates the Michigan-style population.
 3. `selection.py` selects the hidden neurons that survive each generation.
    The default strategy is OMP-style residual selection.
-4. `logistic_output.py` fits the output layer with logistic loss and L2
-   regularisation.
+4. `logistic_output.py` fits the output layer with logistic loss using
+   Newton/IRLS, without a regularisation parameter or GCV.
 5. `train.py` orchestrates the full loop and can save model arrays plus a JSON
    trace of metrics.
+
+When a validation split is enabled, `train.py` now keeps a checkpoint for the
+generation with the best validation accuracy, using validation log-loss as a
+tie-breaker. Final test metrics are computed from that selected checkpoint,
+not blindly from the last generation. Use `--no-select-best-validation` to keep
+the final generation instead.
 
 ## Quick Start
 
@@ -58,15 +64,39 @@ python benchmark_level1.py
 ```
 
 Compare the four ES selection strategies on the same train/validation/test
-split and save a plot:
+split and save plots:
 
 ```bash
 python compare_strategies.py --epochs 100 --output-dir runs/strategy_comparison
 ```
 
-The comparison plot contains the training-accuracy curve for each strategy and
-the final validation/test accuracy bars. Use validation accuracy for strategy
-selection, and keep test accuracy as the final held-out estimate.
+Run a multi-seed/multi-dataset comparison:
+
+```bash
+python compare_strategies.py \
+  --datasets ionosphere sonar breast-w \
+  --seeds 42 43 44 \
+  --epochs 100 \
+  --output-dir runs/strategy_comparison_multi
+```
+
+The comparison script writes:
+
+- `strategy_comparison.png`: training-accuracy curves plus final
+  validation/test accuracy bars.
+- `validation_accuracy.png`: validation-accuracy curves with the selected
+  checkpoint marked.
+- `strategy_diagnostics.png`: train-validation gap, train log-loss, Newton
+  step norm, and mean selection cost.
+- `aggregate_accuracy.png`: validation/test accuracy means and standard
+  deviations across seeds.
+- `aggregate_probabilistic_metrics.png`: aggregate test log-loss, Brier score,
+  and ROC-AUC.
+- `strategy_comparison_all_runs.json` and `strategy_comparison_summary.json`:
+  raw multi-run metrics and aggregate summaries.
+
+Use validation accuracy for strategy selection, and keep test accuracy as the
+final held-out estimate.
 
 ## Dataset Selection
 

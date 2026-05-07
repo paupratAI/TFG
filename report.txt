@@ -1,0 +1,946 @@
+\section{Problem Framing and Motivation}
+\label{sec:problem_framing}
+
+The objective of this project is to study an alternative way of training the
+hidden representation of a single-hidden-layer Multilayer Perceptron (MLP) for
+tabular classification. Instead of using backpropagation to jointly optimise
+all parameters, the hidden layer is evolved with a Michigan-style Evolution
+Strategy (ES), while the output layer is solved separately after the hidden
+activations have been fixed.
+
+The project was developed in two successive architectural stages. The first
+stage used an analytical Ridge regression output layer with Generalised
+Cross-Validation (GCV). This was useful as a controlled baseline: once the
+hidden activations were known, the hidden-to-output (H2O) weights could be
+obtained by a numerically stable linear solve. However, Ridge regression is a
+regression surrogate for a classification problem. It produces real-valued
+scores rather than class probabilities, and classification is obtained only by
+thresholding those scores. Although this is a common and sometimes effective
+engineering shortcut, it is statistically less natural than fitting a
+probabilistic classifier.
+
+The second stage therefore reformulated the output layer as an unregularised
+logistic classifier. This choice is deliberate: adding logistic activation and
+cross-entropy breaks the closed-form Ridge/GCV solution, so the logistic variant
+does not attempt to reuse a Ridge-style $\lambda$ selection mechanism. The
+hidden layer is still evolved exactly as before, but the final linear score is
+now interpreted as a logit:
+\begin{equation}
+    z(\mathbf{x}) =
+    \widetilde{\boldsymbol{\phi}}(\mathbf{x})^\top \boldsymbol{\beta},
+    \qquad
+    p(y=+1 \mid \mathbf{x}) = \sigma(z(\mathbf{x})),
+    \label{eq:binary_logit}
+\end{equation}
+where
+\begin{equation}
+    \sigma(z) = \frac{1}{1+\exp(-z)}.
+\end{equation}
+The probability of the negative class is the complement:
+\begin{equation}
+    p(y=-1 \mid \mathbf{x}) = 1 - p(y=+1 \mid \mathbf{x}).
+\end{equation}
+This turns the model from a score-producing binary classifier into a
+probabilistic binary classifier. It also prepares the conceptual path toward
+multi-class classification, where the natural extension would be a softmax
+output layer with one logit per class.
+
+\section{Overall Architecture}
+\label{sec:overall_architecture}
+
+For an input matrix
+$\mathbf{X} \in \mathbb{R}^{m \times n}$, the hidden layer consists of
+$\mu$ neurons. Each neuron $i$ has an input weight vector
+$\mathbf{w}_i \in \mathbb{R}^{n}$ and a bias $b_i$. The genotype of one
+neuron is
+\begin{equation}
+    \boldsymbol{\alpha}_i =
+    [w_{i,1}, \ldots, w_{i,n}, b_i]^\top
+    \in \mathbb{R}^{D},
+    \qquad D = n+1.
+    \label{eq:genotype}
+\end{equation}
+
+The activation matrix of a population of candidate neurons is
+\begin{equation}
+    \boldsymbol{\Phi}
+    = \tanh(\mathbf{X}\mathbf{W}^\top + \mathbf{1}\mathbf{b}^\top)
+    \in \mathbb{R}^{m \times P},
+    \label{eq:hidden_activations}
+\end{equation}
+where $P=\mu+\lambda$ is the number of candidate neurons in the
+parent-plus-offspring pool. After the selection step, only $\mu$ columns
+survive:
+\begin{equation}
+    \boldsymbol{\Phi}_{\mathrm{surv}}
+    \in \mathbb{R}^{m \times \mu}.
+\end{equation}
+The output design matrix is obtained by appending a bias column:
+\begin{equation}
+    \widetilde{\boldsymbol{\Phi}}
+    =
+    [\boldsymbol{\Phi}_{\mathrm{surv}} \mid \mathbf{1}_m]
+    \in \mathbb{R}^{m \times (\mu+1)}.
+    \label{eq:output_design}
+\end{equation}
+
+The evolutionary algorithm is therefore responsible for discovering a useful
+hidden representation, while the output layer converts this representation into
+predictions. In the Ridge version, this conversion was linear regression over
+targets encoded as $\{-1,+1\}$. In the logistic version, the same matrix
+$\widetilde{\boldsymbol{\Phi}}$ is used to fit class probabilities.
+
+\section{Michigan-Style Evolution Strategy}
+\label{sec:michigan_es}
+
+\subsection{Michigan vs. Pittsburgh Representations}
+\label{subsec:michigan_vs_pittsburgh}
+
+Evolutionary neural network training can be implemented using different
+representations. In a Pittsburgh-style representation, each individual encodes
+a complete neural network. Evaluating one individual therefore means evaluating
+an entire model. This is conceptually simple, but expensive: for a population
+of complete MLPs, every individual requires its own hidden activations and its
+own output-layer fit.
+
+This project uses a Michigan-style representation. Each individual is not a
+complete network but a single hidden neuron. A full hidden layer is represented
+collectively by the surviving population. This changes the optimisation
+problem substantially. A candidate pool may contain hundreds of neurons, but
+only one output-layer solve is required for the selected subset. The drawback
+is credit assignment: because individual neurons do not produce predictions
+alone, the algorithm must estimate which neurons are useful members of a
+cooperative set.
+
+\subsection{Population State}
+\label{subsec:population_state}
+
+The population state is implemented in \texttt{core\_es.py}. It contains:
+\begin{itemize}
+    \item \texttt{alpha}: a matrix of genotypes
+    $\mathbf{A} \in \mathbb{R}^{\mu \times D}$.
+    \item \texttt{L}: one lower-triangular strategy matrix per neuron,
+    $\mathbf{L}_i \in \mathbb{R}^{D \times D}$.
+    \item \texttt{beta}: the fitted output weights
+    $\boldsymbol{\beta} \in \mathbb{R}^{(\mu+1)\times 1}$.
+\end{itemize}
+
+The mutation covariance of neuron $i$ is
+\begin{equation}
+    \boldsymbol{\Sigma}_i = \mathbf{L}_i \mathbf{L}_i^\top.
+\end{equation}
+Thus, the genotype and its mutation strategy evolve together. This implements
+self-adaptive mutation: the search distribution is part of the evolving state,
+not a fixed external hyperparameter.
+
+\subsection{Self-Adaptive Mutation}
+\label{subsec:self_adaptive_mutation}
+
+Each generation produces $\lambda$ offspring from the current $\mu$ parents.
+For every offspring, a parent is selected uniformly at random and copied. The
+strategy matrix is then mutated before the genotype is perturbed.
+
+For the diagonal entries of $\mathbf{L}$, which control step sizes, the update
+is log-normal:
+\begin{equation}
+    L'_{ii} =
+    \mathrm{clip}
+    \left(
+        L_{ii}
+        \exp(\tau'\xi_0 + \tau \xi_i),
+        \sigma_{\min},
+        \sigma_{\max}
+    \right),
+    \label{eq:diag_mutation}
+\end{equation}
+where $\xi_0,\xi_i \sim \mathcal{N}(0,1)$,
+\begin{equation}
+    \tau = \frac{1}{\sqrt{2D}},
+    \qquad
+    \tau' = \frac{1}{\sqrt{2\sqrt{D}}}.
+\end{equation}
+The implementation uses $\sigma_{\min}=10^{-4}$ and
+$\sigma_{\max}=10.0$. The lower bound prevents mutation collapse; the upper
+bound prevents runaway step sizes that would saturate the $\tanh$ activations
+and destabilise subsequent matrix computations.
+
+For the strictly lower-triangular entries, small additive Gaussian noise is
+used:
+\begin{equation}
+    L'_{ij} = L_{ij} + \beta_{\mathrm{cov}}\zeta_{ij},
+    \qquad i>j,\quad \zeta_{ij}\sim\mathcal{N}(0,1),
+    \label{eq:offdiag_mutation}
+\end{equation}
+with $\beta_{\mathrm{cov}}=0.05$. Finally, the genotype is mutated as
+\begin{equation}
+    \boldsymbol{\alpha}' =
+    \boldsymbol{\alpha} + \mathbf{L}'\mathbf{z},
+    \qquad \mathbf{z}\sim\mathcal{N}(\mathbf{0},\mathbf{I}).
+    \label{eq:genotype_mutation}
+\end{equation}
+
+\section{Output Layer Formulations}
+\label{sec:output_formulations}
+
+\subsection{First Formulation: Ridge Regression with GCV}
+\label{subsec:ridge_formulation}
+
+The first version of the prototype used Ridge regression for the output
+layer. Given $\widetilde{\boldsymbol{\Phi}}$ and labels
+$\mathbf{y}\in\{-1,+1\}^{m}$, the H2O weights were computed as
+\begin{equation}
+    \boldsymbol{\beta}^*(\lambda)
+    =
+    \arg\min_{\boldsymbol{\beta}}
+    \left\|
+        \mathbf{y}
+        -
+        \widetilde{\boldsymbol{\Phi}}\boldsymbol{\beta}
+    \right\|_2^2
+    +
+    \lambda \|\boldsymbol{\beta}\|_2^2.
+    \label{eq:ridge_objective}
+\end{equation}
+The prediction was a real-valued score:
+\begin{equation}
+    \hat{\mathbf{y}}
+    =
+    \widetilde{\boldsymbol{\Phi}}\boldsymbol{\beta}^*,
+\end{equation}
+and the class decision was obtained by thresholding at zero.
+
+This formulation had several advantages during development:
+\begin{itemize}
+    \item the output layer was fast and deterministic;
+    \item the SVD-based implementation was numerically stable;
+    \item the output solve did not require backpropagation through the hidden
+    layer;
+    \item GCV provided an automatic way to choose $\lambda$ without a separate
+    validation split.
+\end{itemize}
+
+However, the statistical mismatch is clear: Ridge minimises squared error,
+while the task is classification. A very large positive score and a moderately
+positive score both correspond to the same class decision, yet squared error
+treats their magnitudes differently. Moreover, Ridge scores are not calibrated
+class probabilities. This limits interpretability and makes the architecture
+less natural to extend to multi-class classification.
+
+\subsection{Second Formulation: Logistic Output Layer}
+\label{subsec:logistic_formulation}
+
+The current formulation replaces the Ridge output layer with an unregularised
+logistic output layer, implemented in \texttt{logistic\_output.py}. Labels are
+still stored in the rest of the system as $\{-1,+1\}$, but the output solver
+maps them internally to $\{0,1\}$:
+\begin{equation}
+    y_{01} =
+    \begin{cases}
+        1, & y=+1,\\
+        0, & y=-1.
+    \end{cases}
+\end{equation}
+
+The H2O weights are now computed by minimising binary cross-entropy:
+\begin{equation}
+    \boldsymbol{\beta}^*
+    =
+    \arg\min_{\boldsymbol{\beta}}
+    -\frac{1}{m}
+    \sum_{j=1}^{m}
+    \left[
+    y_j \log p_j
+    +
+    (1-y_j)\log(1-p_j)
+    \right],
+    \label{eq:logistic_objective}
+\end{equation}
+where
+\begin{equation}
+    p_j =
+    \sigma(\widetilde{\boldsymbol{\phi}}_j^\top \boldsymbol{\beta}).
+\end{equation}
+There is no regularisation parameter in this formulation. In particular, there
+is no GCV step for logistic regression, because the degrees-of-freedom argument
+used by the Ridge version assumes a linear smoother and does not carry over to
+the nonlinear logistic likelihood.
+
+The optimisation is performed with Newton/IRLS updates. For a current
+parameter vector $\boldsymbol{\beta}$:
+\begin{equation}
+    \mathbf{p} = \sigma(\widetilde{\boldsymbol{\Phi}}\boldsymbol{\beta}),
+\end{equation}
+\begin{equation}
+    \mathbf{g}
+    =
+    \widetilde{\boldsymbol{\Phi}}^\top(\mathbf{p}-\mathbf{y}),
+\end{equation}
+\begin{equation}
+    \mathbf{H}
+    =
+    \widetilde{\boldsymbol{\Phi}}^\top
+    \mathbf{R}
+    \widetilde{\boldsymbol{\Phi}},
+\end{equation}
+where $\mathbf{R}$ is diagonal with entries $p_j(1-p_j)$. The update is
+\begin{equation}
+    \boldsymbol{\beta}
+    \leftarrow
+    \boldsymbol{\beta} - \mathbf{H}^{-1}\mathbf{g}.
+    \label{eq:newton_update}
+\end{equation}
+The code adds a very small numerical damping term to the Hessian before solving
+the Newton system. This is used only to avoid singular linear systems in finite
+precision arithmetic; it is not treated as a modelling hyperparameter, is not
+selected by GCV, and is not used as L2 regularisation.
+
+This is still a separated output-layer solve: the hidden layer is not trained
+by backpropagation. The output problem is a convex logistic regression problem
+conditioned on the evolved hidden representation. The key improvement is that
+the final model now returns probabilities:
+\begin{equation}
+    [p(y=-1\mid\mathbf{x}), p(y=+1\mid\mathbf{x})]
+    =
+    [1-p, p].
+\end{equation}
+
+\subsection{Implications for Multi-Class Classification}
+\label{subsec:multiclass_extension}
+
+The current logistic version is probabilistic but still binary. It returns two
+class probabilities because binary logistic regression has one independent
+logit. To scale the architecture to a problem with $K$ classes, the output
+layer should be generalised to softmax regression:
+\begin{equation}
+    \mathbf{Z}
+    =
+    \widetilde{\boldsymbol{\Phi}}\mathbf{B},
+    \qquad
+    \mathbf{B} \in \mathbb{R}^{(\mu+1)\times K},
+\end{equation}
+\begin{equation}
+    p(y=k\mid\mathbf{x})
+    =
+    \frac{\exp z_k}
+    {\sum_{\ell=1}^{K}\exp z_\ell}.
+    \label{eq:softmax}
+\end{equation}
+The predicted class would then be
+\begin{equation}
+    \hat{y} = \arg\max_k p(y=k\mid\mathbf{x}).
+\end{equation}
+
+This is not yet implemented. Several modules would need to change:
+\begin{itemize}
+    \item \texttt{data.py} currently enforces binary datasets.
+    \item \texttt{logistic\_output.py} currently implements binary logistic
+    regression, not softmax regression.
+    \item \texttt{train.py} currently predicts using a threshold of $0.5$,
+    not an $\arg\max$ over $K$ probabilities.
+    \item selection metrics such as $R^2$, CFS, and AUC-CFS currently assume a
+    binary target and would need one-vs-rest or multi-class adaptations.
+\end{itemize}
+
+\section{Credit Assignment and Neuron Selection}
+\label{sec:selection}
+
+\subsection{Why Credit Assignment is Difficult}
+\label{subsec:credit_assignment}
+
+In the Michigan representation, fitness is not naturally attached to
+individuals. A neuron may be weak in isolation but useful in combination with
+other neurons; conversely, a neuron may be strongly correlated with the target
+but redundant with already selected neurons. The selection module therefore
+implements several strategies for estimating which candidate neurons should
+survive.
+
+\subsection{Marginal $R^2$ with Diversity Penalty}
+\label{subsec:r2_selection}
+
+The simplest baseline scores each candidate neuron by the squared Pearson
+correlation between its activation vector $\boldsymbol{\phi}_i$ and the target:
+\begin{equation}
+    R_i^2 =
+    \left(
+    \frac{
+    \mathrm{Cov}(\boldsymbol{\phi}_i,\mathbf{y})
+    }{
+    \mathrm{Std}(\boldsymbol{\phi}_i)\mathrm{Std}(\mathbf{y})
+    }
+    \right)^2.
+    \label{eq:r2_score}
+\end{equation}
+To reduce redundancy, the implementation applies a greedy diversity penalty:
+\begin{equation}
+    s_i^{\mathrm{eff}}
+    =
+    R_i^2
+    -
+    \gamma
+    \max_{j\in\mathcal{S}}
+    |\mathrm{Cor}(\boldsymbol{\phi}_i,\boldsymbol{\phi}_j)|.
+    \label{eq:diversity_penalty}
+\end{equation}
+This is fast and useful as an ablation, but it cannot model synergy because
+each neuron is still evaluated mainly as an individual predictor.
+
+\subsection{OMP Residual Selection}
+\label{subsec:omp_selection}
+
+The main selection strategy is inspired by Orthogonal Matching Pursuit (OMP).
+Instead of repeatedly scoring neurons against the original target, it scores
+them against the residual left unexplained by previously selected neurons.
+The algorithm proceeds greedily:
+\begin{enumerate}
+    \item centre the target so that the output bias can absorb its mean;
+    \item normalise all candidate activation columns;
+    \item select the neuron most aligned with the current residual;
+    \item orthogonalise the selected direction against previous directions;
+    \item subtract the explained component from the residual.
+\end{enumerate}
+This directly addresses the cooperative nature of the hidden layer: each new
+selection attempts to explain what the current subset does not yet capture.
+
+\subsection{Correlation-based Feature Selection (CFS)}
+\label{subsec:cfs}
+
+The CFS strategy treats neurons as candidate features. A good subset should
+contain neurons that are relevant to the target but not redundant with each
+other. The implemented merit function is
+\begin{equation}
+    \mathrm{Merit}(\mathcal{S})
+    =
+    \frac{
+    k \cdot \overline{r}_{cf}
+    }{
+    \sqrt{k + k(k-1)\overline{r}_{ff}}
+    },
+    \label{eq:cfs_merit}
+\end{equation}
+where $k=|\mathcal{S}|$, $\overline{r}_{cf}$ is the mean squared
+neuron-target correlation, and $\overline{r}_{ff}$ is the mean squared
+neuron-neuron correlation inside the selected subset.
+
+The implementation precomputes the full candidate-candidate squared
+correlation matrix once per generation and then updates the merit incrementally
+during greedy forward selection. This keeps the strategy practical for the
+default pool size $P=400$.
+
+\subsection{Ranking-based CFS: AUC and Spearman}
+\label{subsec:cfs_auc}
+
+An additional strategy, \texttt{cfs\_auc}, was implemented to test whether
+ranking-based statistics improve selection. The relevance term becomes squared
+Gini-AUC:
+\begin{equation}
+    r_{cf}(i) = (2\mathrm{AUC}_i - 1)^2.
+    \label{eq:gini_auc}
+\end{equation}
+This mapping is important: random ranking gives AUC $=0.5$ and therefore
+zero relevance, while both AUC $=1$ and AUC $=0$ indicate perfect separability
+up to sign. The sign can be handled by the logistic output coefficient.
+
+The redundancy term is squared Spearman correlation between activation ranks:
+\begin{equation}
+    r_{ff}(i,j) =
+    \rho_{\mathrm{Spearman}}
+    (\boldsymbol{\phi}_i,\boldsymbol{\phi}_j)^2.
+\end{equation}
+This penalises monotonic duplicates even when the raw activation scales differ.
+The empirical cost is higher because ranks must be computed for every
+candidate column.
+
+\section{Software Architecture}
+\label{sec:software_architecture}
+
+The current implementation is organised as follows:
+\begin{description}
+    \item[\texttt{data.py}] OpenML loading, binary label mapping,
+    train/test or train/validation/test splitting, median imputation, and
+    standardisation without data leakage.
+
+    \item[\texttt{core\_es.py}] Michigan ES state, self-adaptive mutation, and
+    vectorised hidden activation computation.
+
+    \item[\texttt{selection.py}] OMP, marginal $R^2$ with diversity penalty,
+    CFS, and AUC/Spearman CFS.
+
+    \item[\texttt{gcv.py}] Historical Ridge+GCV output layer used in the first
+    formulation. It is retained for comparison and documentation of the first
+    stage.
+
+    \item[\texttt{logistic\_output.py}] Current probabilistic output layer:
+    unregularised binary logistic regression, stable sigmoid, probability
+    prediction, class prediction, and Newton/IRLS convergence tracing.
+
+    \item[\texttt{train.py}] Main ES training loop. It supports the four
+    selection strategies, optional validation split, validation checkpointing,
+    overfit mode, probability-quality metrics, and JSON/NPZ run artifact
+    saving.
+
+    \item[\texttt{compare\_strategies.py}] Experimental script that runs the
+    four ES selection strategies on common train/validation/test splits. It can
+    run a single dataset/seed or a multi-dataset, multi-seed benchmark, saving
+    per-run histories, aggregate summaries, and several diagnostic plots.
+
+    \item[\texttt{train\_ga\_conventional.py}] Pittsburgh-style GA baseline in
+    which each individual encodes a full hidden layer. In the logistic
+    formulation, it shares the same logistic output solver as the ES model.
+
+    \item[\texttt{train\_pytorch\_conventional.py}] Conventional neural MLP
+    baseline trained with AdamW and BCEWithLogitsLoss.
+\end{description}
+
+\section{Data Preprocessing}
+\label{sec:data_preprocessing}
+
+The data pipeline is designed to avoid leakage. For the standard binary
+experiments, the dataset is fetched from OpenML and split before any
+preprocessing statistics are estimated. The current implementation performs:
+\begin{enumerate}
+    \item binary-class validation;
+    \item label mapping to $\{-1,+1\}$;
+    \item stratified train/test split, or stratified train/validation/test
+    split when validation is enabled;
+    \item median imputation fitted only on the training subset;
+    \item standardisation fitted only on the training subset.
+\end{enumerate}
+Validation and test data are transformed using the imputer and scaler fitted
+on the training data. This is essential because the validation set is used for
+strategy comparison, and the test set must remain a final held-out estimate.
+
+The default dataset is OpenML ID 59 (\texttt{ionosphere}). The benchmark
+scripts also include \texttt{sonar} and \texttt{breast-w}. OpenML cache files
+are stored in a local project directory to make runs reproducible and avoid
+writing dataset artifacts into the user home directory.
+
+\section{Training Loop}
+\label{sec:training_loop}
+
+Each generation follows the same high-level loop in both the Ridge and
+logistic formulations:
+\begin{enumerate}
+    \item mutate the current population to produce $\lambda$ offspring;
+    \item concatenate parents and offspring into a candidate pool;
+    \item compute the activation matrix $\boldsymbol{\Phi}_{\mathrm{pool}}$;
+    \item select $\mu$ surviving neurons with one of the selection strategies;
+    \item fit the H2O output layer on the selected activations;
+    \item evaluate training metrics and, when available, validation metrics;
+    \item log output-layer loss, mutation statistics, and timing information;
+    \item optionally reset the mutation strategy matrices of weak neurons if
+    progress stagnates.
+\end{enumerate}
+
+The stagnation detector monitors the output criterion over a window of 15
+generations. In the Ridge formulation this criterion was GCV; in the logistic
+formulation it is the unregularised binary log-loss. If relative improvement is
+below $0.005$, the strategy matrices of the weakest 25\% of surviving neurons
+are reset to encourage renewed exploration.
+
+The current implementation also uses the validation split as an actual model
+selection mechanism, not only as a final diagnostic. Whenever validation data
+are available, \texttt{train.py} stores a checkpoint of the population
+$\boldsymbol{\alpha}$, mutation matrices $\mathbf{L}$, and output weights
+$\boldsymbol{\beta}$ for the generation with the best validation accuracy.
+Validation log-loss is used as a tie-breaker. Final test accuracy is therefore
+computed from the selected validation checkpoint rather than automatically from
+the last generation. This is important in the unregularised logistic version,
+because the training set can become separable very early and later generations
+do not necessarily improve generalisation.
+
+\section{Evaluation Metrics}
+\label{sec:evaluation_metrics}
+
+The logistic formulation makes it possible to evaluate not only whether the
+predicted class is correct, but also whether the predicted probability is
+useful. The implementation therefore logs both classification metrics and
+probability-quality metrics in \texttt{train.py}. For a binary target
+$y_j\in\{0,1\}$ and predicted positive-class probability $p_j$, the reported
+metrics are:
+\begin{itemize}
+    \item accuracy, computed after thresholding $p_j$ at 0.5;
+    \item binary log-loss, already defined in
+    Equation~\ref{eq:logistic_objective};
+    \item Brier score;
+    \item ROC-AUC;
+    \item Expected Calibration Error (ECE).
+\end{itemize}
+
+The Brier score is the mean squared error of the probability prediction:
+\begin{equation}
+    \mathrm{Brier}
+    =
+    \frac{1}{m}
+    \sum_{j=1}^{m}
+    (p_j-y_j)^2.
+    \label{eq:brier_score}
+\end{equation}
+Lower values are better. In contrast to accuracy, the Brier score penalises
+both wrong decisions and poorly calibrated confidence. A model that predicts
+$p=0.99$ for the wrong class is penalised much more than a model that predicts
+$p=0.55$ for the wrong class.
+
+ROC-AUC measures the ranking quality of the probabilities. It is computed from
+the same $p_j$ values but does not require choosing the 0.5 decision threshold.
+This is useful when two strategies have the same accuracy but rank the positive
+and negative samples differently.
+
+ECE is used as a compact calibration diagnostic. The implementation first
+converts each binary probability into a confidence
+\begin{equation}
+    c_j = \max(p_j, 1-p_j),
+\end{equation}
+and then divides the interval $[0,1]$ into bins. For each bin $B_b$, it compares
+the average confidence with the empirical accuracy:
+\begin{equation}
+    \mathrm{ECE}
+    =
+    \sum_b
+    \frac{|B_b|}{m}
+    \left|
+    \mathrm{acc}(B_b)
+    -
+    \mathrm{conf}(B_b)
+    \right|.
+    \label{eq:ece}
+\end{equation}
+Lower ECE means that confidence and empirical correctness are better aligned.
+This metric is especially relevant for the current architecture because the
+output layer is unregularised: when the evolved hidden representation makes the
+training data nearly separable, the logistic probabilities can become extremely
+confident. Accuracy may remain high, while log-loss, Brier score, or ECE reveal
+that probability quality is poor.
+
+The metrics are stored for the final selected checkpoint under keys such as
+\texttt{test\_log\_loss}, \texttt{test\_brier}, \texttt{test\_roc\_auc}, and
+\texttt{test\_ece}. Training and validation histories also include
+\texttt{train\_brier}, \texttt{train\_roc\_auc}, \texttt{train\_ece},
+\texttt{validation\_brier}, \texttt{validation\_roc\_auc}, and
+\texttt{validation\_ece}. This makes it possible to compare selection
+strategies even when their validation or test accuracies are identical.
+
+\section{Baseline Architectures}
+\label{sec:baselines}
+
+\subsection{Conventional Genetic Algorithm}
+\label{subsec:ga_baseline}
+
+The conventional GA baseline uses a Pittsburgh-style representation: each
+individual encodes an entire hidden layer. Its chromosome has shape
+\begin{equation}
+    (H, n+1),
+\end{equation}
+where $H$ is the number of hidden units. It uses tournament selection,
+arithmetic crossover, Gaussian mutation, and elitism. Its output layer is
+fitted using the same output solver as the ES model in the corresponding
+formulation. Therefore, differences between the ES and GA baselines primarily
+reflect the hidden-layer search representation rather than the output solver.
+
+\subsection{PyTorch MLP}
+\label{subsec:pytorch_baseline}
+
+The PyTorch baseline is a conventional gradient-trained MLP using AdamW,
+BCEWithLogitsLoss, dropout, batch normalisation, learning-rate scheduling, and
+early stopping. This baseline is not intended to obey the same training
+constraints as the ES model; it provides a reference point against a standard
+deep-learning workflow.
+
+\section{Experimental Results}
+\label{sec:experimental_results}
+
+\subsection{Historical Ridge Formulation}
+\label{subsec:ridge_results}
+
+The first Ridge-based implementation demonstrated that the Michigan-style ES
+could train a useful hidden representation without backpropagating through the
+hidden layer. On the \texttt{ionosphere} dataset, the conventional GA baseline
+log recorded a test accuracy of 0.8592 after 100 generations, with best train
+accuracy 0.9893 and best GCV 0.1756. The PyTorch baseline logs recorded
+0.9296 test accuracy for a single-hidden-layer model and 0.9437 for the best
+multi-layer configuration.
+
+The Ridge formulation was therefore a valid developmental stage. However, the
+later logistic formulation is conceptually more appropriate for classification
+because it optimises cross-entropy and returns probabilities rather than raw
+least-squares scores.
+
+\subsection{Logistic Selection-Strategy Comparison}
+\label{subsec:logistic_strategy_results}
+
+The current unregularised logistic architecture was evaluated with
+\texttt{compare\_strategies.py} on OpenML Ionosphere using 100 generations,
+$\mu=50$, $\lambda=350$, a 20\% validation split of the non-test data, and a
+20\% held-out test set. All four selection strategies were run on the same
+split and seed. Table~\ref{tab:logistic_strategy_comparison} reports the final
+results stored in \texttt{runs/strategy\_comparison/strategy\_comparison.json}.
+For each strategy, the reported model is the generation selected by validation
+accuracy.
+
+\begin{table}[H]
+\centering
+\caption{Selection-strategy comparison for the unregularised logistic output
+formulation on
+\texttt{ionosphere}.}
+\label{tab:logistic_strategy_comparison}
+\begin{tabular}{@{}lrrrrrrrrr@{}}
+\toprule
+Strategy & Gen & Val Acc & Test Acc & Test LL & Brier & AUC & ECE & Select ms & Time (s) \\
+\midrule
+OMP      & 90 & 0.9107 & \textbf{0.8873} & \textbf{1.8694} & \textbf{0.1037} & \textbf{0.9035} & \textbf{0.1096} & 0.9 & 0.9 \\
+$R^2$ + diversity & 6 & 0.9107 & \textbf{0.8873} & 2.5380 & 0.1127 & 0.8887 & 0.1127 & 0.5 & 0.9 \\
+CFS      & 32 & \textbf{0.9464} & 0.8732 & 2.4370 & 0.1294 & 0.8878 & 0.1323 & 1.4 & 1.0 \\
+CFS-AUC  & 75 & 0.9286 & 0.8732 & 3.5025 & 0.1268 & 0.8657 & 0.1268 & 52.2 & 6.1 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+The best validation performance in this run is obtained by standard CFS.
+However, OMP and the $R^2$ diversity baseline obtain the highest final test
+accuracy. The probability metrics separate these two apparently tied models:
+OMP has lower test log-loss, lower Brier score, higher ROC-AUC, and lower ECE
+than $R^2$. This confirms that equal accuracy does not imply equal probabilistic
+behaviour. This difference is important methodologically: validation accuracy
+is the quantity that should guide strategy choice during development, while test
+accuracy should remain a final held-out estimate. The selected generation column
+also shows why checkpointing matters: the best $R^2$ model is found at
+generation 6, not at generation 100. OMP, $R^2$, and CFS all reach perfect
+training accuracy with near-zero train log-loss, which indicates that the
+selected hidden representation can make the training set almost separable.
+CFS-AUC is substantially slower because ranking every activation column is more
+expensive than computing Pearson correlations with BLAS operations.
+
+\subsection{Multi-Seed and Multi-Dataset Evaluation}
+\label{subsec:multi_seed_dataset_results}
+
+A single split is useful for debugging, but it is not enough to support a
+strong experimental claim. The comparison script was therefore extended to run
+the full strategy comparison across several seeds and several datasets. The
+command used for the current aggregate experiment was:
+\begin{verbatim}
+python compare_strategies.py \
+  --datasets ionosphere sonar \
+  --seeds 42 43 \
+  --epochs 30 \
+  --output-dir runs/strategy_comparison_multi
+\end{verbatim}
+This benchmark is intentionally smaller than the 100-generation Ionosphere run:
+it uses 30 generations so that all four strategies can be evaluated on two
+datasets and two random seeds at reasonable cost. The purpose is not to replace
+a final large-scale benchmark, but to verify that conclusions are not based on
+only one random split.
+
+The script saves:
+\begin{itemize}
+    \item \texttt{strategy\_comparison\_all\_runs.json}, containing every run,
+    its selected checkpoint, metrics, and training history;
+    \item \texttt{strategy\_comparison\_summary.json}, containing mean and
+    standard deviation for each dataset/strategy and for the overall aggregate;
+    \item \texttt{aggregate\_accuracy.png}, comparing validation and test
+    accuracy means with standard-deviation bars;
+    \item \texttt{aggregate\_probabilistic\_metrics.png}, comparing test
+    log-loss, Brier score, and ROC-AUC.
+\end{itemize}
+
+Table~\ref{tab:multi_dataset_results} reports the main aggregate metrics. The
+values are mean $\pm$ standard deviation over the two seeds.
+
+\begin{table}[H]
+\centering
+\caption{Multi-seed, multi-dataset strategy comparison with 30 generations.}
+\label{tab:multi_dataset_results}
+\begin{tabular}{@{}llrrrr@{}}
+\toprule
+Dataset & Strategy & Val Acc & Test Acc & Test Brier & Test AUC \\
+\midrule
+Ionosphere & OMP & $0.8750\pm0.0000$ & $0.8310\pm0.0704$ & $0.1667\pm0.0658$ & $0.8578\pm0.0387$ \\
+Ionosphere & $R^2$ & $0.9018\pm0.0089$ & $\textbf{0.8803}\pm0.0070$ & $\textbf{0.1193}\pm0.0067$ & $0.8465\pm0.0422$ \\
+Ionosphere & CFS & $\textbf{0.9107}\pm0.0179$ & $0.8451\pm0.0000$ & $0.1520\pm0.0031$ & $\textbf{0.8743}\pm0.0091$ \\
+Ionosphere & CFS-AUC & $0.9018\pm0.0089$ & $0.8521\pm0.0070$ & $0.1447\pm0.0090$ & $0.8498\pm0.0424$ \\
+\midrule
+Sonar & OMP & $0.8088\pm0.0441$ & $\textbf{0.7857}\pm0.0476$ & $0.2142\pm0.0489$ & $\textbf{0.8648}\pm0.0398$ \\
+Sonar & $R^2$ & $0.8235\pm0.0294$ & $\textbf{0.7857}\pm0.0952$ & $0.2159\pm0.0968$ & $0.8131\pm0.0665$ \\
+Sonar & CFS & $\textbf{0.8529}\pm0.0000$ & $\textbf{0.7857}\pm0.0238$ & $\textbf{0.2053}\pm0.0150$ & $0.8432\pm0.0023$ \\
+Sonar & CFS-AUC & $\textbf{0.8529}\pm0.0000$ & $0.7262\pm0.0833$ & $0.2556\pm0.0834$ & $0.7926\pm0.0903$ \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+The overall aggregate across the four dataset/seed combinations is:
+\begin{table}[H]
+\centering
+\caption{Overall aggregate across Ionosphere and Sonar, seeds 42 and 43.}
+\label{tab:overall_aggregate_results}
+\begin{tabular}{@{}lrrrrrr@{}}
+\toprule
+Strategy & Val Acc & Test Acc & Test LogLoss & Test Brier & Test AUC & Test ECE \\
+\midrule
+OMP & $0.8419\pm0.0455$ & $0.8084\pm0.0642$ & $\textbf{3.1278}\pm1.0460$ & $0.1905\pm0.0627$ & $\textbf{0.8613}\pm0.0394$ & $0.1921\pm0.0637$ \\
+$R^2$ & $0.8627\pm0.0448$ & $\textbf{0.8330}\pm0.0824$ & $3.9332\pm2.0199$ & $\textbf{0.1676}\pm0.0839$ & $0.8298\pm0.0581$ & $\textbf{0.1693}\pm0.0873$ \\
+CFS & $\textbf{0.8818}\pm0.0315$ & $0.8154\pm0.0341$ & $3.7642\pm0.2627$ & $0.1786\pm0.0288$ & $0.8588\pm0.0169$ & $0.1800\pm0.0302$ \\
+CFS-AUC & $0.8774\pm0.0252$ & $0.7892\pm0.0864$ & $4.3602\pm2.0342$ & $0.2001\pm0.0812$ & $0.8212\pm0.0761$ & $0.2052\pm0.0826$ \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+These aggregate results are deliberately interpreted cautiously because they
+use only two seeds and two datasets. Still, they reveal patterns that are not
+visible from a single test accuracy. CFS has the strongest average validation
+accuracy, suggesting that its relevance/redundancy criterion is useful for
+model selection. $R^2$ has the highest average test accuracy and the best
+average Brier score/ECE in this small benchmark, suggesting that its selected
+models are sometimes less overconfident. OMP has the best average log-loss and
+ROC-AUC, suggesting stronger probability ranking despite not having the best
+test accuracy. CFS-AUC remains computationally expensive and, in this
+experiment, does not compensate that cost with better aggregate performance.
+
+The key methodological improvement is that the prototype can now distinguish
+between several meanings of ``better'': higher validation accuracy, higher test
+accuracy, lower probabilistic error, better ranking, better calibration, or
+lower computational cost. This is essential for a probabilistic classifier,
+because two models can have identical accuracy while producing very different
+probabilities.
+
+\subsection{Interpretation}
+\label{subsec:results_interpretation}
+
+The results support five conclusions.
+
+First, the Michigan-style ES representation is expressive enough to fit the
+training data. Several strategies reach 1.0000 training accuracy. This confirms
+that poor generalisation, when it occurs, is not due to insufficient capacity
+but to the interaction between selection pressure, the absence of explicit
+output regularisation, and dataset size.
+
+Second, the output-layer reformulation matters. With the unregularised logistic
+layer, the model produces probabilities and can be evaluated with log-loss in
+addition to accuracy. This makes the architecture more aligned with
+classification than the original Ridge surrogate, while also making convergence
+and separability issues more visible through the Newton step norm.
+The high test log-loss values despite good test accuracy show that these
+probabilities are not necessarily well calibrated; the model can be confidently
+wrong on a small number of held-out samples.
+
+Third, credit assignment remains the central difficulty. OMP, $R^2$, CFS, and
+CFS-AUC use the same evolved-neuron pool and the same logistic output solver,
+yet they produce different validation/test behaviour. This indicates that
+which neurons survive is more important than minor details of the final
+classifier once the output layer is solved consistently.
+
+Fourth, validation checkpointing improves the experimental protocol. It does
+not alter the architecture of the hidden layer or reintroduce output
+regularisation, but it prevents the reported test result from depending on an
+arbitrary final generation after the training set has already become separable.
+
+Fifth, the ranking of strategies depends on which metric is prioritised.
+Validation accuracy, test accuracy, log-loss, Brier score, ROC-AUC, ECE, and
+runtime do not always select the same strategy. This is not a contradiction:
+they evaluate different properties of a probabilistic classifier. For the
+current prototype, this means that strategy comparison should be reported as a
+multi-metric analysis rather than as a single accuracy number.
+
+\section{Discussion of the Ridge-to-Logistic Reformulation}
+\label{sec:ridge_to_logistic}
+
+The move from Ridge to logistic output should not be interpreted as discarding
+the first prototype. The Ridge version was useful because it established the
+feasibility of the central idea: evolve hidden neurons and solve the output
+layer separately. Its closed-form SVD implementation also helped identify
+important numerical and architectural issues, such as activation saturation,
+candidate redundancy, and the need for a leakage-free data pipeline.
+
+The logistic version addresses the main conceptual weakness of the Ridge
+version. Classification models should ideally produce class probabilities and
+optimise a classification-appropriate likelihood. Binary logistic regression
+does exactly this. The cost is that the output solve is no longer a single
+closed-form SVD operation; it is a deterministic convex optimisation problem
+solved by Newton/IRLS. However, this optimisation is confined to the output
+layer. The hidden layer is still not trained by backpropagation.
+
+An important design decision is that the logistic output layer is left
+unregularised. Introducing an L2 penalty would add a new hyperparameter
+$\lambda$, but the Ridge GCV mechanism cannot be transferred to logistic
+regression: the logistic model is not a linear smoother of the targets, and the
+closed-form degrees-of-freedom expression used by GCV no longer applies. The
+implemented logistic variant therefore follows the simpler and cleaner option:
+given fixed hidden activations, fit ordinary binary logistic regression on top
+of them.
+
+This gives a more defensible final architecture:
+\begin{itemize}
+    \item evolutionary search learns the hidden representation;
+    \item unregularised logistic regression converts that representation into
+    class probabilities;
+    \item accuracy and log-loss can both be reported;
+    \item validation accuracy can be used for strategy and checkpoint selection;
+    \item test accuracy remains a final estimate on unseen data.
+\end{itemize}
+
+\section{Limitations and Future Work}
+\label{sec:limitations}
+
+The current system remains a binary classifier. Although
+\texttt{predict\_class\_proba} returns a two-column probability matrix, those
+two probabilities are complements of a single sigmoid output. A genuine
+multi-class version requires a softmax output layer, a matrix of output
+weights $\mathbf{B}\in\mathbb{R}^{(\mu+1)\times K}$, and categorical
+cross-entropy.
+
+The selection strategies also require multi-class adaptation. Possible
+extensions include:
+\begin{itemize}
+    \item one-vs-rest relevance scores for $R^2$ and CFS;
+    \item mutual-information based relevance;
+    \item multi-class AUC or macro-averaged one-vs-rest AUC for CFS-AUC;
+    \item redundancy measures independent of class labels, such as Spearman or
+    Pearson neuron-neuron correlation, which already generalise naturally.
+\end{itemize}
+
+The experiments have been extended beyond a single split, but they are still
+limited by scale. The current aggregate benchmark uses two datasets and two
+seeds, which is enough to expose variance but not enough for a final
+statistical claim. A stronger evaluation should run all strategies over more
+OpenML datasets and more seeds, reporting mean, standard deviation, confidence
+intervals, and possibly paired significance tests.
+
+Another limitation is probabilistic calibration. The unregularised logistic
+output gives probabilities by construction, but near-separable hidden
+representations can produce extremely confident probabilities. This is visible
+in the gap between accuracy and held-out log-loss. A future extension could
+measure Brier score, reliability diagrams, or post-hoc temperature scaling on
+the validation set. That would improve probability quality without changing the
+basic Michigan-style hidden-layer search.
+
+\section{Conclusion}
+\label{sec:conclusion}
+
+This project developed a Michigan-style evolutionary MLP in which each
+individual represents a single hidden neuron. The central challenge is credit
+assignment: because predictions are produced by a set of neurons, not by one
+neuron alone, selection strategies must estimate cooperative contribution.
+Four strategies were implemented: OMP residual selection, marginal $R^2$ with
+diversity penalty, CFS, and AUC/Spearman CFS.
+
+The first version of the prototype used Ridge regression with GCV as an
+analytical output layer. This validated the separation between evolutionary
+hidden-layer search and deterministic output-layer fitting, but it remained a
+regression surrogate for classification. The current version replaces this
+with an unregularised logistic output layer, producing probabilities for the
+two binary classes and optimising cross-entropy. This makes the model more
+statistically appropriate for classification and provides a clear path toward
+future softmax-based multi-class classification, while acknowledging that the
+closed-form Ridge/GCV advantage is lost in the logistic version.
+
+Empirically, on the 100-generation Ionosphere comparison with the
+unregularised logistic output and validation checkpointing, CFS achieved the
+best validation accuracy (0.9464), while OMP and the $R^2$ diversity baseline
+tied for the highest final test accuracy (0.8873). The added probabilistic
+metrics show that this tie is not a true equivalence: OMP had better test
+log-loss, Brier score, ROC-AUC, and ECE than $R^2$ on that run. In the
+multi-seed, multi-dataset 30-generation benchmark, CFS obtained the best
+average validation accuracy, $R^2$ obtained the best average test accuracy and
+Brier/ECE, and OMP obtained the best average log-loss and ROC-AUC. Following
+proper model-selection protocol, the validation result is the more appropriate
+basis for choosing the strategy, and the test result should be reported as a
+final held-out estimate rather than used to tune the prototype. The broader
+conclusion is that the prototype is now evaluated as a probabilistic classifier,
+not merely as a thresholded classifier.
