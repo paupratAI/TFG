@@ -81,12 +81,13 @@ def omp_residual_selection(
     4. Update the residual:    r <- r - (q . r) * q
        After this step, r is perpendicular to the direction i* just captured.
 
-    Cost per generation: O(mu * m * P)  --  no Ridge solve inside the loop.
+    Cost per generation: O(mu * m * P)  --  no output-layer solve inside the loop.
 
     Parameters
     ----------
     Phi : (m, P)       activation matrix for all P candidate neurons.
-                       Must NOT include a bias column (added later before Ridge).
+                       Must NOT include a bias column (added later before the
+                       Ridge/GCV output fit).
     y   : (m,) or (m,1) target labels.
     mu  : number of neurons to select.
 
@@ -321,6 +322,176 @@ def diversity_penalised_selection(
     return np.array(selected, dtype=np.int64)
 
 
+# ─────────────────────────────────────────────────────────────────────────────
+# Multiclass selection helpers for softmax/CE experiments
+# ─────────────────────────────────────────────────────────────────────────────
+
+def _one_hot_centered(y: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
+    """Return classes and centred one-vs-rest indicator matrix."""
+    y_v = np.asarray(y).reshape(-1)
+    classes, y_idx = np.unique(y_v, return_inverse=True)
+    if len(classes) < 2:
+        raise ValueError("Multiclass selection needs at least two classes.")
+    Y = np.eye(len(classes), dtype=np.float64)[y_idx]
+    Y -= Y.mean(axis=0, keepdims=True)
+    return classes, Y
+
+
+def multiclass_r2_fitness(Phi: np.ndarray, y: np.ndarray) -> np.ndarray:
+    """
+    Score neurons by mean squared one-vs-rest correlation across classes.
+
+    This is the multiclass analogue of r2_fitness.  A neuron is relevant when
+    its activation correlates with at least one centred class-indicator column.
+    """
+    _classes, Y_c = _one_hot_centered(y)
+    Phi64 = np.asarray(Phi, dtype=np.float64)
+    phi_c = Phi64 - Phi64.mean(axis=0, keepdims=True)
+
+    phi_norms = np.maximum(np.linalg.norm(phi_c, axis=0), 1e-12)
+    y_norms = np.maximum(np.linalg.norm(Y_c, axis=0), 1e-12)
+    corr = (phi_c / phi_norms[np.newaxis, :]).T @ (Y_c / y_norms[np.newaxis, :])
+    return np.mean(corr ** 2, axis=1).astype(np.float64)
+
+
+def multiclass_omp_residual_selection(
+    Phi: np.ndarray,
+    y: np.ndarray,
+    mu: int,
+) -> np.ndarray:
+    """
+    OMP-style greedy selection for multiclass targets.
+
+    The residual is a centred one-hot matrix.  At each step a candidate neuron
+    is scored by the squared norm of its projection onto all class residuals.
+    """
+    _classes, R = _one_hot_centered(y)
+    Phi64 = np.asfortranarray(Phi, dtype=np.float64)
+    m, P = Phi64.shape
+    if mu > P:
+        raise ValueError(f"Cannot select {mu} neurons from a pool of {P}.")
+
+    phi_norms = np.linalg.norm(Phi64, axis=0)
+    safe_norms = np.where(phi_norms > 1e-10, phi_norms, 1.0)
+    Phi_n = Phi64 / safe_norms[np.newaxis, :]
+    degenerate = phi_norms <= 1e-10
+
+    selected: list[int] = []
+    Q_mat = np.empty((m, mu), dtype=np.float64, order="F")
+    k = 0
+    available = np.ones(P, dtype=bool)
+
+    for _ in range(mu):
+        dots = Phi_n.T @ R
+        scores = np.sum(dots ** 2, axis=1)
+        scores[degenerate] = 0.0
+        scores[~available] = -np.inf
+        i_star = int(np.argmax(scores))
+
+        q = Phi64[:, i_star].copy()
+        if k > 0:
+            Q_k = Q_mat[:, :k]
+            q = q - Q_k @ (Q_k.T @ q)
+            q = q - Q_k @ (Q_k.T @ q)
+
+        q_norm = np.linalg.norm(q)
+        if q_norm < 1e-10:
+            available[i_star] = False
+            continue
+
+        q = q / q_norm
+        Q_mat[:, k] = q
+        k += 1
+        R = R - np.outer(q, q @ R)
+
+        selected.append(i_star)
+        available[i_star] = False
+
+    if len(selected) < mu:
+        fallback = multiclass_r2_fitness(Phi64, y)
+        if selected:
+            fallback[np.array(selected, dtype=np.int64)] = -np.inf
+        while len(selected) < mu:
+            fb_idx = int(np.argmax(fallback))
+            selected.append(fb_idx)
+            fallback[fb_idx] = -np.inf
+
+    return np.array(selected[:mu], dtype=np.int64)
+
+
+def multiclass_cfs_selection(
+    Phi: np.ndarray,
+    y: np.ndarray,
+    mu: int,
+    epsilon: float = 1e-12,
+) -> np.ndarray:
+    """
+    CFS-style greedy selection for multiclass targets.
+
+    Relevance is the mean squared one-vs-rest correlation.  Redundancy remains
+    squared Pearson correlation between candidate neuron activations.
+    """
+    Phi64 = np.asarray(Phi, dtype=np.float64)
+    _m, P = Phi64.shape
+    if mu > P:
+        raise ValueError(f"Cannot select {mu} neurons from a pool of {P}.")
+
+    phi_c = Phi64 - Phi64.mean(axis=0, keepdims=True)
+    col_norms = np.linalg.norm(phi_c, axis=0)
+    safe_norms = np.where(col_norms > epsilon, col_norms, 1.0)
+    degenerate = col_norms <= epsilon
+    phi_n = phi_c / safe_norms[np.newaxis, :]
+
+    r_cf = multiclass_r2_fitness(Phi64, y)
+    r_cf[degenerate] = 0.0
+
+    C = (phi_n.T @ phi_n) ** 2
+    C[degenerate, :] = 0.0
+    C[:, degenerate] = 0.0
+
+    selected: list[int] = []
+    available = np.ones(P, dtype=bool)
+    available[degenerate] = False
+    sum_rcf = 0.0
+    sum_rff = 0.0
+
+    for step in range(mu):
+        new_k = step + 1
+        new_rcf = sum_rcf + r_cf
+        if not selected:
+            new_rff_vec = np.zeros(P, dtype=np.float64)
+        else:
+            new_rff_vec = sum_rff + C[:, selected].sum(axis=1)
+
+        mean_rcf_vec = new_rcf / new_k
+        if new_k > 1:
+            n_pairs = new_k * (new_k - 1) / 2.0
+            mean_rff_vec = new_rff_vec / n_pairs
+        else:
+            mean_rff_vec = np.zeros(P, dtype=np.float64)
+
+        denom_sq_vec = np.maximum(new_k + new_k * (new_k - 1) * mean_rff_vec, epsilon)
+        merit_vec = new_k * mean_rcf_vec / np.sqrt(denom_sq_vec)
+        merit_vec[~available] = -np.inf
+        merit_vec[degenerate] = -np.inf
+
+        if not np.any(np.isfinite(merit_vec)):
+            fallback = r_cf.copy()
+            if selected:
+                fallback[np.array(selected, dtype=np.int64)] = -np.inf
+            i_star = int(np.argmax(fallback))
+        else:
+            i_star = int(np.argmax(merit_vec))
+
+        if selected:
+            sum_rff += float(C[i_star, selected].sum())
+        sum_rcf += float(r_cf[i_star])
+        selected.append(i_star)
+        available[i_star] = False
+
+    return np.array(selected, dtype=np.int64)
+
+
 def cfs_selection(
     Phi: np.ndarray,
     y: np.ndarray,
@@ -459,7 +630,8 @@ def cfs_auc_selection(
 
       - r_cf = (2*AUC(phi_i, y) - 1)^2
         AUC=0.5 maps to 0, while AUC=0 or AUC=1 both map to 1 because an
-        inverted neuron can still be useful to the signed Ridge output layer.
+        inverted neuron can still be useful because the Ridge output layer can
+        assign it a negative coefficient.
 
       - r_ff = Spearman(phi_i, phi_j)^2
         Redundancy is rank-based, so monotonic duplicates are penalised even

@@ -26,7 +26,8 @@ class MichiganESState:
                         D = n_features + 1.
     L     : (mu, D, D)  Per-neuron lower-triangular Cholesky factor.
                         The actual mutation covariance of neuron i is L_i @ L_i.T.
-    beta  : (mu+1, 1)   Analytic output weights, set after each Ridge solve.
+    beta  : (mu+1, 1)   Ridge output weights.  The final score is thresholded
+                        at zero for {-1,+1} classification.
                         None until the first generation completes.
     mu    : int         Population size = hidden layer width.
     D     : int         Genotype length = n_features + 1.

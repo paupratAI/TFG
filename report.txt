@@ -1,0 +1,1500 @@
+\section{Problem Framing and Motivation}
+\label{sec:problem_framing}
+
+The objective of this project is to study an alternative way of training the
+hidden representation of a single-hidden-layer Multilayer Perceptron (MLP) for
+tabular classification. Instead of using backpropagation to jointly optimise
+all parameters, the hidden layer is evolved with a Michigan-style Evolution
+Strategy (ES), while the output layer is solved separately after the hidden
+activations have been fixed.
+
+The project was developed in two successive architectural stages. The first
+stage used an analytical Ridge regression output layer with Generalised
+Cross-Validation (GCV). This was useful as a controlled baseline: once the
+hidden activations were known, the hidden-to-output (H2O) weights could be
+obtained by a numerically stable linear solve. However, Ridge regression is a
+regression surrogate for a classification problem. It produces real-valued
+scores rather than class probabilities, and classification is obtained only by
+thresholding those scores. Although this is a common and sometimes effective
+engineering shortcut, it is statistically less natural than fitting a
+probabilistic classifier.
+
+The second stage therefore reformulated the output layer as an unregularised
+logistic classifier. This choice is deliberate: adding logistic activation and
+cross-entropy breaks the closed-form Ridge/GCV solution, so the logistic variant
+does not attempt to reuse a Ridge-style $\lambda_R$ selection mechanism. The
+hidden layer is still evolved exactly as before, but the final linear score is
+now interpreted as a logit:
+\begin{equation}
+    z(\mathbf{x}) =
+    \widetilde{\boldsymbol{\phi}}(\mathbf{x})^\top \boldsymbol{\beta},
+    \qquad
+    p(y=+1 \mid \mathbf{x}) = \sigma(z(\mathbf{x})),
+    \label{eq:binary_logit}
+\end{equation}
+where
+\begin{equation}
+    \sigma(z) = \frac{1}{1+\exp(-z)}.
+\end{equation}
+The probability of the negative class is the complement:
+\begin{equation}
+    p(y=-1 \mid \mathbf{x}) = 1 - p(y=+1 \mid \mathbf{x}).
+\end{equation}
+This turns the model from a score-producing binary classifier into a
+probabilistic binary classifier. It also prepares the conceptual path toward
+multi-class classification, where the natural extension would be a softmax
+output layer with one logit per class.
+
+The final repository keeps both ideas conceptually separate. The \texttt{ridge}
+architecture preserves the analytical Ridge/GCV output layer and is used for
+the current experiments in this report. The logistic architecture is discussed
+as a probabilistic alternative and as the natural route toward softmax
+classification, but it is not mixed with GCV.
+
+\section{Overall Architecture}
+\label{sec:overall_architecture}
+
+For an input matrix
+$\mathbf{X} \in \mathbb{R}^{m \times n}$, the hidden layer consists of
+$\mu$ neurons. Each neuron $i$ has an input weight vector
+$\mathbf{w}_i \in \mathbb{R}^{n}$ and a bias $b_i$. The genotype of one
+neuron is
+\begin{equation}
+    \boldsymbol{\alpha}_i =
+    [w_{i,1}, \ldots, w_{i,n}, b_i]^\top
+    \in \mathbb{R}^{D},
+    \qquad D = n+1.
+    \label{eq:genotype}
+\end{equation}
+
+The activation matrix of a population of candidate neurons is
+\begin{equation}
+    \boldsymbol{\Phi}
+    = \tanh(\mathbf{X}\mathbf{W}^\top + \mathbf{1}\mathbf{b}^\top)
+    \in \mathbb{R}^{m \times P},
+    \label{eq:hidden_activations}
+\end{equation}
+where $P=\mu+\lambda_{\mathrm{ES}}$ is the number of candidate neurons in the
+parent-plus-offspring pool. To avoid notation ambiguity, the evolutionary
+offspring count is denoted as $\lambda_{\mathrm{ES}}$ in the rest of this
+report, while the Ridge regularisation parameter is denoted as
+$\lambda_R$. After the selection step, only $\mu$ columns survive:
+\begin{equation}
+    \boldsymbol{\Phi}_{\mathrm{surv}}
+    \in \mathbb{R}^{m \times \mu}.
+\end{equation}
+The output design matrix is obtained by appending a bias column:
+\begin{equation}
+    \widetilde{\boldsymbol{\Phi}}
+    =
+    [\boldsymbol{\Phi}_{\mathrm{surv}} \mid \mathbf{1}_m]
+    \in \mathbb{R}^{m \times (\mu+1)}.
+    \label{eq:output_design}
+\end{equation}
+
+The evolutionary algorithm is therefore responsible for discovering a useful
+hidden representation, while the output layer converts this representation into
+predictions. In the Ridge version, this conversion was linear regression over
+targets encoded as $\{-1,+1\}$. In the logistic version, the same matrix
+$\widetilde{\boldsymbol{\Phi}}$ is used to fit class probabilities.
+
+\section{Michigan-Style Evolution Strategy}
+\label{sec:michigan_es}
+
+\subsection{Michigan vs. Pittsburgh Representations}
+\label{subsec:michigan_vs_pittsburgh}
+
+Evolutionary neural network training can be implemented using different
+representations. In a Pittsburgh-style representation, each individual encodes
+a complete neural network. Evaluating one individual therefore means evaluating
+an entire model. This is conceptually simple, but expensive: for a population
+of complete MLPs, every individual requires its own hidden activations and its
+own output-layer fit.
+
+This project uses a Michigan-style representation. Each individual is not a
+complete network but a single hidden neuron. A full hidden layer is represented
+collectively by the surviving population. This changes the optimisation
+problem substantially. A candidate pool may contain hundreds of neurons, but
+only one output-layer solve is required for the selected subset. The drawback
+is credit assignment: because individual neurons do not produce predictions
+alone, the algorithm must estimate which neurons are useful members of a
+cooperative set.
+
+\subsection{Population State}
+\label{subsec:population_state}
+
+The population state is implemented in \texttt{core\_es.py}. It contains:
+\begin{itemize}
+    \item \texttt{alpha}: a matrix of genotypes
+    $\mathbf{A} \in \mathbb{R}^{\mu \times D}$.
+    \item \texttt{L}: one lower-triangular strategy matrix per neuron,
+    $\mathbf{L}_i \in \mathbb{R}^{D \times D}$.
+    \item \texttt{beta}: the fitted output weights
+    $\boldsymbol{\beta} \in \mathbb{R}^{(\mu+1)\times 1}$.
+\end{itemize}
+
+The mutation covariance of neuron $i$ is
+\begin{equation}
+    \boldsymbol{\Sigma}_i = \mathbf{L}_i \mathbf{L}_i^\top.
+\end{equation}
+Thus, the genotype and its mutation strategy evolve together. This implements
+self-adaptive mutation: the search distribution is part of the evolving state,
+not a fixed external hyperparameter.
+
+\subsection{Self-Adaptive Mutation}
+\label{subsec:self_adaptive_mutation}
+
+Each generation produces $\lambda_{\mathrm{ES}}$ offspring from the current
+$\mu$ parents.
+For every offspring, a parent is selected uniformly at random and copied. The
+strategy matrix is then mutated before the genotype is perturbed.
+
+For the diagonal entries of $\mathbf{L}$, which control step sizes, the update
+is log-normal:
+\begin{equation}
+    L'_{ii} =
+    \mathrm{clip}
+    \left(
+        L_{ii}
+        \exp(\tau'\xi_0 + \tau \xi_i),
+        \sigma_{\min},
+        \sigma_{\max}
+    \right),
+    \label{eq:diag_mutation}
+\end{equation}
+where $\xi_0,\xi_i \sim \mathcal{N}(0,1)$,
+\begin{equation}
+    \tau = \frac{1}{\sqrt{2D}},
+    \qquad
+    \tau' = \frac{1}{\sqrt{2\sqrt{D}}}.
+\end{equation}
+The implementation uses $\sigma_{\min}=10^{-4}$ and
+$\sigma_{\max}=10.0$. The lower bound prevents mutation collapse; the upper
+bound prevents runaway step sizes that would saturate the $\tanh$ activations
+and destabilise subsequent matrix computations.
+
+For the strictly lower-triangular entries, small additive Gaussian noise is
+used:
+\begin{equation}
+    L'_{ij} = L_{ij} + \beta_{\mathrm{cov}}\zeta_{ij},
+    \qquad i>j,\quad \zeta_{ij}\sim\mathcal{N}(0,1),
+    \label{eq:offdiag_mutation}
+\end{equation}
+with $\beta_{\mathrm{cov}}=0.05$. Finally, the genotype is mutated as
+\begin{equation}
+    \boldsymbol{\alpha}' =
+    \boldsymbol{\alpha} + \mathbf{L}'\mathbf{z},
+    \qquad \mathbf{z}\sim\mathcal{N}(\mathbf{0},\mathbf{I}).
+    \label{eq:genotype_mutation}
+\end{equation}
+
+\section{Output Layer Formulations}
+\label{sec:output_formulations}
+
+\subsection{First Formulation: Ridge Regression with GCV}
+\label{subsec:ridge_formulation}
+
+The first version of the prototype used Ridge regression for the output
+layer. Given $\widetilde{\boldsymbol{\Phi}}$ and labels
+$\mathbf{y}\in\{-1,+1\}^{m}$, the H2O weights were computed as
+\begin{equation}
+    \boldsymbol{\beta}^*(\lambda_R)
+    =
+    \arg\min_{\boldsymbol{\beta}}
+    \left\|
+        \mathbf{y}
+        -
+        \widetilde{\boldsymbol{\Phi}}\boldsymbol{\beta}
+    \right\|_2^2
+    +
+    \lambda_R \|\boldsymbol{\beta}\|_2^2.
+    \label{eq:ridge_objective}
+\end{equation}
+The implementation in \texttt{gcv.py} solves this problem through an economy
+SVD rather than by explicitly inverting
+$\widetilde{\boldsymbol{\Phi}}^\top\widetilde{\boldsymbol{\Phi}}$. Let
+\begin{equation}
+    \widetilde{\boldsymbol{\Phi}}
+    =
+    \mathbf{U}
+    \mathrm{diag}(\mathbf{d})
+    \mathbf{V}^\top,
+\end{equation}
+where $\mathbf{d}$ contains the singular values. For a fixed
+$\lambda_R$, the Ridge solution is
+\begin{equation}
+    \boldsymbol{\beta}^*(\lambda_R)
+    =
+    \mathbf{V}
+    \mathrm{diag}
+    \left(
+        \frac{d_j}{d_j^2+\lambda_R}
+    \right)
+    \mathbf{U}^\top\mathbf{y}.
+    \label{eq:ridge_svd_solution}
+\end{equation}
+The corresponding fitted scores can be written as a linear smoother:
+\begin{equation}
+    \widehat{\mathbf{y}}(\lambda_R)
+    =
+    \mathbf{U}
+    \mathrm{diag}
+    \left(
+        \frac{d_j^2}{d_j^2+\lambda_R}
+    \right)
+    \mathbf{U}^\top\mathbf{y}.
+    \label{eq:ridge_smoother}
+\end{equation}
+This expression is what makes GCV possible. The effective degrees of freedom
+of the smoother are
+\begin{equation}
+    \mathrm{df}(\lambda_R)
+    =
+    \sum_j
+    \frac{d_j^2}{d_j^2+\lambda_R}.
+    \label{eq:ridge_df}
+\end{equation}
+For each candidate $\lambda_R$, the implementation computes
+\begin{equation}
+    \mathrm{GCV}(\lambda_R)
+    =
+    \frac{
+        \frac{1}{m}
+        \left\|
+            \mathbf{y} - \widehat{\mathbf{y}}(\lambda_R)
+        \right\|_2^2
+    }{
+        \left(
+            1-\frac{\mathrm{df}(\lambda_R)}{m}
+        \right)^2
+    }.
+    \label{eq:gcv_score}
+\end{equation}
+The selected value is the candidate with the lowest GCV score. If no explicit
+grid is supplied, \texttt{gcv.py} builds a logarithmic grid from the singular
+values: the lower end is based on the smallest squared singular value and the
+upper end on the largest squared singular value, with numerical caps to avoid
+degenerate grids. Thus, one SVD is reused both to evaluate the GCV criterion
+and to recover the final output weights.
+
+The appended output bias is part of
+$\widetilde{\boldsymbol{\Phi}}$ and is therefore included in
+$\boldsymbol{\beta}$ during the same Ridge solve. The implementation does not
+special-case the intercept; it favours a single compact solver for all output
+weights.
+
+The prediction was a real-valued score:
+\begin{equation}
+    \hat{\mathbf{y}}
+    =
+    \widetilde{\boldsymbol{\Phi}}\boldsymbol{\beta}^*,
+\end{equation}
+and the class decision was obtained by thresholding at zero.
+
+This formulation had several advantages during development:
+\begin{itemize}
+    \item the output layer was fast and deterministic;
+    \item the SVD-based implementation was numerically stable;
+    \item the output solve did not require backpropagation through the hidden
+    layer;
+    \item GCV provided an automatic way to choose $\lambda_R$ without a
+    separate validation split for regularisation.
+\end{itemize}
+
+However, the statistical mismatch is clear: Ridge minimises squared error,
+while the task is classification. A very large positive score and a moderately
+positive score both correspond to the same class decision, yet squared error
+treats their magnitudes differently. Moreover, Ridge scores are not calibrated
+class probabilities. This limits interpretability and makes the architecture
+less natural to extend to multi-class classification.
+
+\subsection{Second Formulation: Logistic Output Layer}
+\label{subsec:logistic_formulation}
+
+The alternative probabilistic formulation replaces the Ridge output layer with
+an unregularised logistic output layer, implemented in the \texttt{logistic}
+architecture through \texttt{logistic\_output.py}. Labels are still stored in
+the rest of the system as $\{-1,+1\}$, but the output solver maps them
+internally to $\{0,1\}$:
+\begin{equation}
+    y_{01} =
+    \begin{cases}
+        1, & y=+1,\\
+        0, & y=-1.
+    \end{cases}
+\end{equation}
+
+The H2O weights are now computed by minimising binary cross-entropy:
+\begin{equation}
+    \boldsymbol{\beta}^*
+    =
+    \arg\min_{\boldsymbol{\beta}}
+    -\frac{1}{m}
+    \sum_{j=1}^{m}
+    \left[
+    y_j \log p_j
+    +
+    (1-y_j)\log(1-p_j)
+    \right],
+    \label{eq:logistic_objective}
+\end{equation}
+where
+\begin{equation}
+    p_j =
+    \sigma(\widetilde{\boldsymbol{\phi}}_j^\top \boldsymbol{\beta}).
+\end{equation}
+There is no regularisation parameter in this formulation. In particular, there
+is no GCV step for logistic regression, because the degrees-of-freedom argument
+used by the Ridge version assumes a linear smoother and does not carry over to
+the nonlinear logistic likelihood.
+
+The current \texttt{logistic\_output.py} implementation fits this convex
+output problem with an unregularised \texttt{lbfgs} logistic solver. The solver
+uses \texttt{fit\_intercept=False} because the bias column is already appended
+to $\widetilde{\boldsymbol{\Phi}}$. This keeps the architecture consistent:
+the hidden layer produces features, the bias is part of the design matrix, and
+the output layer is fitted as a separate convex problem.
+
+This is still a separated output-layer solve: the hidden layer is not trained
+by backpropagation. The output problem is a convex logistic regression problem
+conditioned on the evolved hidden representation. The key improvement is that
+the final model now returns probabilities:
+\begin{equation}
+    [p(y=-1\mid\mathbf{x}), p(y=+1\mid\mathbf{x})]
+    =
+    [1-p, p].
+\end{equation}
+
+\subsection{Implications for Multi-Class Classification}
+\label{subsec:multiclass_extension}
+
+The binary logistic version returns two class probabilities because binary
+logistic regression has one independent logit. To scale the architecture to a
+problem with $K$ classes, the output layer is generalised to softmax
+regression:
+\begin{equation}
+    \mathbf{Z}
+    =
+    \widetilde{\boldsymbol{\Phi}}\mathbf{B},
+    \qquad
+    \mathbf{B} \in \mathbb{R}^{(\mu+1)\times K},
+\end{equation}
+\begin{equation}
+    p(y=k\mid\mathbf{x})
+    =
+    \frac{\exp z_k}
+    {\sum_{\ell=1}^{K}\exp z_\ell}.
+    \label{eq:softmax}
+\end{equation}
+The predicted class is then
+\begin{equation}
+    \hat{y} = \arg\max_k p(y=k\mid\mathbf{x}).
+\end{equation}
+
+This multiclass path is now implemented in the experimental benchmark
+\texttt{logistic\_multiclass\_benchmark.py}, while the main
+\texttt{train.py} entry point remains binary. The implementation changes are:
+\begin{itemize}
+    \item \texttt{logistic\_output.py} provides softmax probabilities and an
+    unregularised cross-entropy output fit.
+    \item \texttt{logistic\_multiclass\_benchmark.py} loads multiclass
+    datasets, uses an $\arg\max$ decision rule, and reports multiclass
+    accuracy, macro-F1, log-loss, and ECE.
+    \item \texttt{selection.py} includes multiclass OMP, multiclass $R^2$, and
+    multiclass CFS based on one-vs-rest class indicators.
+\end{itemize}
+
+\section{Credit Assignment and Neuron Selection}
+\label{sec:selection}
+
+\subsection{Why Credit Assignment is Difficult}
+\label{subsec:credit_assignment}
+
+In the Michigan representation, fitness is not naturally attached to
+individuals. A neuron may be weak in isolation but useful in combination with
+other neurons; conversely, a neuron may be strongly correlated with the target
+but redundant with already selected neurons. The selection module therefore
+implements several strategies for estimating which candidate neurons should
+survive.
+
+\subsection{Marginal $R^2$ with Diversity Penalty}
+\label{subsec:r2_selection}
+
+The simplest baseline scores each candidate neuron by the squared Pearson
+correlation between its activation vector $\boldsymbol{\phi}_i$ and the target:
+\begin{equation}
+    R_i^2 =
+    \left(
+    \frac{
+    \mathrm{Cov}(\boldsymbol{\phi}_i,\mathbf{y})
+    }{
+    \mathrm{Std}(\boldsymbol{\phi}_i)\mathrm{Std}(\mathbf{y})
+    }
+    \right)^2.
+    \label{eq:r2_score}
+\end{equation}
+To reduce redundancy, the implementation applies a greedy diversity penalty:
+\begin{equation}
+    s_i^{\mathrm{eff}}
+    =
+    R_i^2
+    -
+    \gamma
+    \max_{j\in\mathcal{S}}
+    |\mathrm{Cor}(\boldsymbol{\phi}_i,\boldsymbol{\phi}_j)|.
+    \label{eq:diversity_penalty}
+\end{equation}
+This is fast and useful as an ablation, but it cannot model synergy because
+each neuron is still evaluated mainly as an individual predictor.
+
+\subsection{OMP Residual Selection}
+\label{subsec:omp_selection}
+
+The main selection strategy is inspired by Orthogonal Matching Pursuit (OMP).
+Instead of repeatedly scoring neurons against the original target, it scores
+them against the residual left unexplained by previously selected neurons.
+The algorithm proceeds greedily:
+\begin{enumerate}
+    \item centre the target so that the output bias can absorb its mean;
+    \item normalise all candidate activation columns;
+    \item select the neuron most aligned with the current residual;
+    \item orthogonalise the selected direction against previous directions;
+    \item subtract the explained component from the residual.
+\end{enumerate}
+This directly addresses the cooperative nature of the hidden layer: each new
+selection attempts to explain what the current subset does not yet capture.
+
+\subsection{Correlation-based Feature Selection (CFS)}
+\label{subsec:cfs}
+
+The CFS strategy treats neurons as candidate features. A good subset should
+contain neurons that are relevant to the target but not redundant with each
+other. The implemented merit function is
+\begin{equation}
+    \mathrm{Merit}(\mathcal{S})
+    =
+    \frac{
+    k \cdot \overline{r}_{cf}
+    }{
+    \sqrt{k + k(k-1)\overline{r}_{ff}}
+    },
+    \label{eq:cfs_merit}
+\end{equation}
+where $k=|\mathcal{S}|$, $\overline{r}_{cf}$ is the mean squared
+neuron-target correlation, and $\overline{r}_{ff}$ is the mean squared
+neuron-neuron correlation inside the selected subset.
+
+The implementation precomputes the full candidate-candidate squared
+correlation matrix once per generation and then updates the merit incrementally
+during greedy forward selection. This keeps the strategy practical for the
+default pool size $P=400$.
+
+\subsection{Ranking-based CFS: AUC and Spearman}
+\label{subsec:cfs_auc}
+
+An additional strategy, \texttt{cfs\_auc}, was implemented to test whether
+ranking-based statistics improve selection. The relevance term becomes squared
+Gini-AUC:
+\begin{equation}
+    r_{cf}(i) = (2\mathrm{AUC}_i - 1)^2.
+    \label{eq:gini_auc}
+\end{equation}
+This mapping is important: random ranking gives AUC $=0.5$ and therefore
+zero relevance, while both AUC $=1$ and AUC $=0$ indicate perfect separability
+up to sign. The sign can be handled by the logistic output coefficient.
+
+The redundancy term is squared Spearman correlation between activation ranks:
+\begin{equation}
+    r_{ff}(i,j) =
+    \rho_{\mathrm{Spearman}}
+    (\boldsymbol{\phi}_i,\boldsymbol{\phi}_j)^2.
+\end{equation}
+This penalises monotonic duplicates even when the raw activation scales differ.
+The empirical cost is higher because ranks must be computed for every
+candidate column.
+
+\section{Software Architecture}
+\label{sec:software_architecture}
+
+The repository now contains two closely related architectural formulations.
+The \texttt{ridge} formulation is the current branch described by the code in
+this directory. It keeps the closed-form Ridge/GCV output layer. The
+\texttt{logistic} formulation was explored as an alternative: it replaces the
+closed-form output solve with unregularised logistic regression and therefore
+returns probabilities, but it necessarily loses the GCV-based $\lambda_R$
+selection mechanism.
+
+The Ridge/GCV implementation is organised as follows:
+\begin{description}
+    \item[\texttt{data.py}] OpenML loading, binary label mapping to
+    $\{-1,+1\}$, train/test or train/validation/test splitting, median
+    imputation, and standardisation without data leakage.
+
+    \item[\texttt{core\_es.py}] Michigan ES state, self-adaptive mutation, and
+    vectorised hidden activation computation. The state contains
+    \texttt{alpha}, \texttt{L}, and the fitted Ridge output weights
+    \texttt{beta}.
+
+    \item[\texttt{selection.py}] Credit-assignment strategies for choosing the
+    surviving hidden neurons: OMP residual selection, marginal $R^2$ with
+    diversity penalty, standard CFS, CFS-AUC, and multiclass OMP/$R^2$/CFS
+    variants for the softmax benchmark.
+
+    \item[\texttt{gcv.py}] Analytic Ridge regression output solver. It performs
+    one economy SVD of the selected design matrix, evaluates an adaptive grid
+    of positive $\lambda_R$ candidates, chooses the best GCV score, and returns
+    the corresponding H2O weights.
+
+    \item[\texttt{train.py}] Main Ridge/GCV ES training loop. It supports the
+    four selection strategies, validation checkpointing, overfit mode, score
+    metrics, timing metrics, and JSON/NPZ artifact saving.
+
+    \item[\texttt{compare\_strategies.py}] Experimental driver for comparing
+    the four selection strategies on common train/validation/test splits. It
+    saves train-accuracy curves, validation-accuracy curves, diagnostic plots,
+    aggregate plots, and JSON summaries.
+
+    \item[\texttt{train\_ga\_conventional.py}] Pittsburgh-style GA baseline in
+    which each individual encodes a full hidden layer. It now uses the same
+    Ridge/GCV output solver as the ES model, so the comparison focuses on the
+    hidden-layer search representation.
+
+    \item[\texttt{train\_pytorch\_conventional.py}] Conventional neural MLP
+    baseline trained by gradient descent. It provides a reference point against
+    a standard deep-learning workflow.
+\end{description}
+
+In the logistic alternative, \texttt{logistic\_output.py} implements sigmoid,
+softmax, class-probability prediction, and unregularised logistic/softmax
+output fitting. The main Ridge training loop still uses \texttt{gcv.py}; the
+logistic/softmax code is exercised through the dedicated benchmark scripts so
+that the two architectural formulations remain conceptually separated.
+
+\subsection{End-to-End Flow of the Ridge Prototype}
+\label{subsec:ridge_end_to_end_flow}
+
+The complete Ridge execution flow can be read directly from the interaction
+between \texttt{data.py}, \texttt{core\_es.py}, \texttt{selection.py},
+\texttt{gcv.py}, and \texttt{train.py}. Conceptually, the pipeline is:
+\begin{enumerate}
+    \item The user launches \texttt{train.py} with a dataset, a selection
+    strategy, and ES hyperparameters such as $\mu$, $\lambda_{\mathrm{ES}}$,
+    number of epochs, and initial mutation scale.
+    \item \texttt{data.py} loads the OpenML dataset, validates that the
+    classification target is binary, maps labels to $\{-1,+1\}$, splits the
+    data, imputes missing values, and standardises features.
+    \item \texttt{core\_es.py} initialises $\mu$ hidden neurons. Each neuron is
+    represented by its input weights and bias, plus its own mutation matrix
+    $\mathbf{L}_i$.
+    \item At each generation, \texttt{mutate\_population} creates
+    $\lambda_{\mathrm{ES}}$ offspring neurons. Parents and offspring form a
+    candidate pool of size $P=\mu+\lambda_{\mathrm{ES}}$.
+    \item \texttt{compute\_activations} evaluates all candidate neurons on the
+    training matrix, producing
+    $\boldsymbol{\Phi}_{\mathrm{pool}}\in\mathbb{R}^{m\times P}$.
+    \item \texttt{selection.py} chooses the $\mu$ columns that survive. The
+    selected columns define the hidden representation used by the output
+    layer.
+    \item A bias column is appended to the selected activation matrix, giving
+    $\widetilde{\boldsymbol{\Phi}}\in\mathbb{R}^{m\times(\mu+1)}$.
+    \item \texttt{compute\_ridge\_gcv} performs one SVD, evaluates the GCV
+    criterion over candidate $\lambda_R$ values, and returns both the selected
+    $\lambda_R$ and the corresponding output weights
+    $\boldsymbol{\beta}$.
+    \item The model produces scores
+    $s=\widetilde{\boldsymbol{\Phi}}\boldsymbol{\beta}$. For binary
+    classification, the sign of $s$ gives the predicted class.
+    \item If a validation split is active, \texttt{train.py} stores the best
+    checkpoint according to validation accuracy, with validation MSE as a
+    tie-breaker. Test metrics are computed only from that selected checkpoint.
+    \item If \texttt{--save-dir} is supplied, the run writes a JSON history and
+    an NPZ file containing \texttt{alpha}, \texttt{L}, and \texttt{beta}.
+\end{enumerate}
+
+This flow highlights the main design decision of the Ridge architecture:
+evolution is used only to search the hidden representation. Once that
+representation is fixed, the output layer is not trained iteratively. It is
+solved analytically.
+
+\section{Data Preprocessing}
+\label{sec:data_preprocessing}
+
+The data pipeline is designed to avoid leakage. For binary classification
+experiments, the dataset is fetched from OpenML and split before any
+preprocessing statistics are estimated. The implementation performs:
+\begin{enumerate}
+    \item binary-class validation;
+    \item label mapping to $\{-1,+1\}$;
+    \item stratified train/test split, or stratified train/validation/test
+    split when validation is enabled;
+    \item median imputation fitted only on the training subset;
+    \item standardisation fitted only on the training subset.
+\end{enumerate}
+Validation and test data are transformed using the imputer and scaler fitted
+on the training data. This is essential because the validation set is used for
+strategy and checkpoint selection, while the test set must remain a final
+held-out estimate.
+
+The default dataset is OpenML ID 59 (\texttt{ionosphere}). The benchmark
+scripts also include \texttt{sonar} and \texttt{breast-w}.
+
+\section{Training Loop}
+\label{sec:training_loop}
+
+Each Ridge/GCV ES generation follows this loop:
+\begin{enumerate}
+    \item mutate the current population to produce $\lambda_{\mathrm{ES}}$
+    offspring;
+    \item concatenate parents and offspring into a candidate pool;
+    \item compute the activation matrix $\boldsymbol{\Phi}_{\mathrm{pool}}$;
+    \item select $\mu$ surviving neurons with one of the four selection
+    strategies;
+    \item append the output bias column to obtain
+    $\widetilde{\boldsymbol{\Phi}}_{\mathrm{surv}}$;
+    \item solve the H2O layer with \texttt{compute\_ridge\_gcv};
+    \item threshold Ridge scores at zero for classification;
+    \item log accuracy, MSE, ROC-AUC, GCV, selected $\lambda_R$, mutation
+    statistics, and timing.
+\end{enumerate}
+
+The stagnation detector monitors the GCV value over a window of 15
+generations. If relative improvement is below $0.005$, the strategy matrices
+of the weakest 25\% of surviving neurons are reset. This does not reset their
+genotypes; it reopens local exploration by restoring mutation step sizes.
+
+When validation data are available, \texttt{train.py} stores a checkpoint of
+the generation with the highest validation accuracy, using validation MSE as a
+tie-breaker. Final test metrics are computed from this selected checkpoint.
+This prevents the reported test result from depending on an arbitrary final
+generation and makes the experimental protocol closer to standard model
+selection practice.
+
+\section{Evaluation Metrics}
+\label{sec:evaluation_metrics}
+
+In the Ridge/GCV formulation, the output layer produces real-valued scores:
+\begin{equation}
+    s_j =
+    \widetilde{\boldsymbol{\phi}}(\mathbf{x}_j)^\top\boldsymbol{\beta}.
+\end{equation}
+Classification uses the decision rule
+\begin{equation}
+    \hat{y}_j =
+    \begin{cases}
+        +1, & s_j \geq 0, \\
+        -1, & s_j < 0.
+    \end{cases}
+\end{equation}
+The reported Ridge metrics are:
+\begin{itemize}
+    \item accuracy after zero-thresholding;
+    \item MSE between labels $\{-1,+1\}$ and Ridge scores;
+    \item ROC-AUC computed from the raw scores;
+    \item selected GCV value and selected $\lambda_R$;
+    \item mean selection time and mean generation time.
+\end{itemize}
+
+Accuracy measures the final decision. ROC-AUC measures ranking quality without
+requiring a threshold. MSE measures score stability: two models may have the
+same accuracy but very different score magnitudes. This distinction is
+important in Ridge classification because an overconfident score can still have
+the correct sign but poor squared error.
+
+The logistic alternative uses different metrics because it produces
+probabilities: log-loss, Brier score, ROC-AUC, and Expected Calibration Error
+(ECE). These metrics remain relevant for the discussion of the probabilistic
+architecture, but they are not produced by the current Ridge branch.
+
+\section{Baseline Architectures}
+\label{sec:baselines}
+
+\subsection{Conventional Genetic Algorithm}
+\label{subsec:ga_baseline}
+
+The conventional GA baseline uses a Pittsburgh-style representation: each
+individual encodes an entire hidden layer. Its chromosome has shape
+\begin{equation}
+    (H, n+1),
+\end{equation}
+where $H$ is the number of hidden units. It uses tournament selection,
+arithmetic crossover, Gaussian mutation, and elitism. Its output layer is
+fitted using the same Ridge/GCV solver as the ES model. Therefore, differences
+between ES and GA primarily reflect how the hidden representation is searched.
+
+\subsection{Gradient MLP Baselines}
+\label{subsec:pytorch_baseline}
+
+The repository contains gradient-trained baselines. The PyTorch baseline
+uses AdamW, BCEWithLogitsLoss, dropout, batch normalisation, learning-rate
+scheduling, and early stopping for binary classification. The defence suite
+also uses a compact sklearn MLP classifier as a standard gradient-descent
+reference model. These baselines are not constrained to keep an analytical
+output layer; they represent the standard gradient-descent alternative.
+
+\section{Experimental Results}
+\label{sec:experimental_results}
+
+\subsection{Current Ridge Multi-Seed and Multi-Dataset Evaluation}
+\label{subsec:ridge_multi_seed_dataset_results}
+
+The current Ridge/GCV branch was evaluated with:
+\begin{verbatim}
+python compare_strategies.py \
+  --datasets ionosphere sonar breast-w \
+  --seeds 42 43 44 \
+  --epochs 60 \
+  --mu 50 \
+  --offspring 250 \
+  --validation-size 0.2 \
+  --output-dir runs/strategy_comparison
+\end{verbatim}
+This script can regenerate the detailed strategy comparison if required. The
+main report keeps the numerical tables and uses the later defence benchmark as
+the compact figure set, avoiding duplicate plots.
+
+Table~\ref{tab:ridge_strategy_per_dataset} reports the per-dataset aggregate
+metrics. Values are mean $\pm$ standard deviation over seeds 42, 43, and 44.
+
+\begin{table}[H]
+\centering
+\caption{Ridge/GCV strategy comparison over three datasets and three seeds.}
+\label{tab:ridge_strategy_per_dataset}
+\begin{tabular}{@{}llrrrr@{}}
+\toprule
+Dataset & Strategy & Val Acc & Test Acc & Test MSE & Test AUC \\
+\midrule
+Breast-W & OMP & $0.9702\pm0.0168$ & $0.9619\pm0.0121$ & $0.1560\pm0.0198$ & $0.9792\pm0.0066$ \\
+Breast-W & $R^2$ & $0.9792\pm0.0111$ & $0.9667\pm0.0147$ & $0.1272\pm0.0656$ & $0.9695\pm0.0382$ \\
+Breast-W & CFS & $0.9821\pm0.0126$ & $0.9643\pm0.0175$ & $11.8334\pm16.3170$ & $0.9604\pm0.0432$ \\
+Breast-W & CFS-AUC & $\textbf{0.9851}\pm0.0042$ & $0.9643\pm0.0117$ & $\textbf{0.1133}\pm0.0121$ & $\textbf{0.9914}\pm0.0013$ \\
+\midrule
+Ionosphere & OMP & $0.9107\pm0.0253$ & $0.8592\pm0.0718$ & $0.5828\pm0.1359$ & $0.8620\pm0.0543$ \\
+Ionosphere & $R^2$ & $0.9048\pm0.0084$ & $0.8873\pm0.0304$ & $0.3348\pm0.0609$ & $0.9545\pm0.0282$ \\
+Ionosphere & CFS & $\textbf{0.9643}\pm0.0000$ & $\textbf{0.9249}\pm0.0332$ & $\textbf{0.2722}\pm0.0899$ & $\textbf{0.9681}\pm0.0248$ \\
+Ionosphere & CFS-AUC & $0.8929\pm0.0000$ & $0.8826\pm0.0370$ & $0.3428\pm0.0797$ & $0.9449\pm0.0243$ \\
+\midrule
+Sonar & OMP & $0.8137\pm0.0367$ & $0.8016\pm0.0297$ & $0.6715\pm0.0088$ & $0.8864\pm0.0134$ \\
+Sonar & $R^2$ & $0.8235\pm0.0240$ & $0.7778\pm0.0224$ & $0.5192\pm0.0304$ & $0.9061\pm0.0158$ \\
+Sonar & CFS & $0.8431\pm0.0139$ & $\textbf{0.8413}\pm0.0489$ & $\textbf{0.4956}\pm0.0620$ & $\textbf{0.9212}\pm0.0260$ \\
+Sonar & CFS-AUC & $0.8431\pm0.0500$ & $0.8095\pm0.0194$ & $0.5716\pm0.0418$ & $0.8962\pm0.0149$ \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+The overall aggregate across all nine runs is shown in
+Table~\ref{tab:ridge_overall_aggregate_results}.
+
+\begin{table}[H]
+\centering
+\caption{Overall Ridge/GCV aggregate across all datasets and seeds.}
+\label{tab:ridge_overall_aggregate_results}
+\begin{tabular}{@{}lrrrrr@{}}
+\toprule
+Strategy & Val Acc & Test Acc & Test MSE & Test AUC & Final GCV \\
+\midrule
+OMP & $0.8982\pm0.0701$ & $0.8742\pm0.0804$ & $0.4701\pm0.2387$ & $0.9092\pm0.0601$ & $0.0675\pm0.0338$ \\
+$R^2$ & $0.9025\pm0.0656$ & $0.8773\pm0.0809$ & $0.3271\pm0.1691$ & $0.9434\pm0.0396$ & $0.2719\pm0.1792$ \\
+CFS & $\textbf{0.9299}\pm0.0627$ & $\textbf{0.9101}\pm0.0624$ & $4.2004\pm10.8578$ & $\textbf{0.9499}\pm0.0384$ & $0.1936\pm0.1514$ \\
+CFS-AUC & $0.9070\pm0.0656$ & $0.8855\pm0.0680$ & $0.3425\pm0.1943$ & $0.9442\pm0.0422$ & $0.1770\pm0.0756$ \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+CFS is the strongest strategy by overall validation accuracy, test accuracy,
+and ROC-AUC in this experiment. However, its large MSE standard deviation
+shows an important limitation of least-squares classification: score magnitude
+can become unstable even when the final sign is usually correct. CFS-AUC is
+more stable on Breast-W and has excellent ROC-AUC there, but it is much more
+expensive because it ranks every candidate activation and computes
+Spearman-style redundancy. OMP remains fast but tends to overfit the training
+set. The $R^2$ diversity strategy is also fast and gives relatively stable
+score MSE, but its average validation/test accuracy is below CFS here.
+
+\subsection{Alternative Logistic Output Formulation}
+\label{subsec:logistic_results_discussion}
+
+The logistic formulation was implemented to address the conceptual limitation
+of Ridge classification: Ridge scores are not probabilities. Given the same
+selected design matrix $\widetilde{\boldsymbol{\Phi}}$, the logistic variant
+fits
+\begin{equation}
+    p(y=+1 \mid \mathbf{x}) =
+    \sigma(
+        \widetilde{\boldsymbol{\phi}}(\mathbf{x})^\top\boldsymbol{\beta}
+    )
+\end{equation}
+with unregularised binary cross-entropy. This is more natural for binary
+classification and gives access to probability metrics such as log-loss,
+Brier score, and ECE.
+
+The trade-off is fundamental: logistic regression has no closed-form Ridge/GCV
+solution. GCV relies on the linear-smoother form of Ridge predictions and on an
+effective degrees-of-freedom trace. A sigmoid likelihood breaks that structure.
+Therefore, the logistic branch intentionally removes $\lambda_R$ rather than
+pretending that the Ridge GCV criterion still applies. For multi-class
+classification, the correct extension of that path is softmax regression with
+one output logit per class and categorical cross-entropy.
+
+\subsection{Interpretation}
+\label{subsec:results_interpretation}
+
+The results support five conclusions.
+
+First, the Michigan-style representation is expressive. The selected hidden
+layers often reach very high training accuracy, and the best validation
+checkpoints generalise competitively on several OpenML datasets.
+
+Second, the analytical Ridge/GCV output layer remains a major strength. Once
+the hidden representation is fixed, the output weights are obtained by a single
+SVD-based solve and $\lambda_R$ is selected automatically. This is the clearest
+technical difference from conventional backpropagation.
+
+Third, credit assignment is the central research question. CFS performs best
+overall in the current Ridge benchmark, but CFS-AUC provides useful
+rank-based robustness on some datasets at a high computational cost. OMP and
+$R^2$ are faster, but their validation/test behaviour is less consistently
+strong.
+
+Fourth, validation/test separation is essential. The validation set is used to
+select checkpoints and strategies; the test set is only used for final
+estimation. This avoids tuning directly against the set that is supposed to
+simulate unseen data.
+
+Fifth, no single metric is sufficient. Accuracy, ROC-AUC, score MSE, GCV, and
+runtime answer different questions. In particular, Ridge classifiers can have
+good accuracy but unstable score magnitudes, which is why MSE and ROC-AUC were
+added to the evaluation.
+
+\subsection{Defence-Oriented Ridge Benchmark}
+\label{subsec:ridge_defence_benchmark}
+
+To make the Ridge formulation easier to defend, an additional experiment suite
+was implemented in \texttt{ridge\_defense\_suite.py}. The goal of this suite is
+not to tune a single best number, but to answer the questions that are most
+likely to arise in an evaluation:
+\begin{itemize}
+    \item how competitive is ES-CFS Ridge/GCV against standard tabular
+    baselines?
+    \item what does the evolved hidden representation add beyond linear Ridge?
+    \item is GCV selecting a reasonable regularisation region?
+    \item what accuracy/cost trade-off does the prototype occupy?
+\end{itemize}
+
+The command used was:
+\begin{verbatim}
+python ridge_defense_suite.py \
+  --datasets ionosphere sonar breast-w \
+  --seeds 42 43 44 \
+  --es-epochs 60 \
+  --es-mu 50 \
+  --es-offspring 250 \
+  --hidden-units-grid 16 32 64 128 256 \
+  --lambda-grid 0.000001 0.0001 0.001 0.01 0.1 1 10 100 1000 \
+  --mlp-max-iter 120 \
+  --output-dir runs/ridge_defense
+\end{verbatim}
+
+The script generated:
+\begin{itemize}
+    \item \texttt{runs/ridge\_defense/summary.json}, with all raw and
+    aggregate metrics;
+    \item \texttt{baseline\_test\_accuracy.png}, comparing all models per
+    dataset;
+    \item \texttt{accuracy\_time\_tradeoff.png}, comparing mean accuracy and
+    mean fit time;
+    \item \texttt{ridge\_ablation.png}, isolating the Ridge architectural
+    contribution;
+    \item \texttt{lambda\_sensitivity.png}, showing the effect of fixed
+    $\lambda_R$ values against the GCV-selected $\lambda_R$;
+    \item \texttt{test\_accuracy\_ranking.png}, ranking all models across
+    dataset/seed pairs;
+    \item \texttt{latex\_notes.tex}, with optional figure snippets generated by
+    the script.
+\end{itemize}
+
+The most significant figures from this suite are included directly below. The
+selected plots focus on the three claims that need visual support in the
+defence: competitiveness against baselines, value of the evolved
+representation, and behaviour of the GCV-selected regularisation parameter.
+The ranking plot remains available in
+\texttt{runs/ridge\_defense/test\_accuracy\_ranking.png}, but the same
+information is already reported numerically in
+Table~\ref{tab:defence_rank_table}.
+
+Table~\ref{tab:defence_overall_baselines} reports the overall aggregate over
+three datasets and three seeds. The values are mean $\pm$ standard deviation.
+
+\begin{table}[H]
+\centering
+\caption{Defence benchmark: ES-CFS Ridge/GCV against standard tabular baselines.}
+\label{tab:defence_overall_baselines}
+\begin{tabular}{@{}lrrrr@{}}
+\toprule
+Model & Val Acc & Test Acc & Test AUC & Fit s \\
+\midrule
+RBF SVM & $0.9163\pm0.0554$ & $\textbf{0.9178}\pm0.0480$ & $\textbf{0.9768}\pm0.0181$ & $0.0006\pm0.0001$ \\
+Random Forest & $0.9028\pm0.0626$ & $0.9110\pm0.0589$ & $0.9701\pm0.0287$ & $0.1421\pm0.0141$ \\
+ES-CFS Ridge+GCV & $\textbf{0.9299}\pm0.0627$ & $0.9101\pm0.0624$ & $0.9499\pm0.0384$ & $0.5093\pm0.2065$ \\
+HistGradientBoosting & $0.9001\pm0.0522$ & $0.9078\pm0.0561$ & $0.9656\pm0.0253$ & $0.0506\pm0.0142$ \\
+Logistic Regression & $0.8615\pm0.1009$ & $0.8951\pm0.0601$ & $0.9273\pm0.0540$ & $0.0013\pm0.0004$ \\
+Linear Ridge+GCV & $0.8751\pm0.0713$ & $0.8902\pm0.0553$ & $0.9423\pm0.0431$ & $0.0006\pm0.0001$ \\
+Random tanh Ridge+GCV & $0.8936\pm0.0622$ & $0.8742\pm0.0715$ & $0.9227\pm0.0535$ & $0.0014\pm0.0011$ \\
+Gradient MLP & $0.8723\pm0.0850$ & $0.8588\pm0.0945$ & $0.9195\pm0.0755$ & $0.0217\pm0.0087$ \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+The strongest overall test accuracy is obtained by the RBF SVM, but the
+prototype is very close: ES-CFS Ridge/GCV obtains $0.9101$ mean test accuracy,
+compared with $0.9178$ for RBF SVM, $0.9110$ for Random Forest, and $0.9078$
+for HistGradientBoosting. Importantly, ES-CFS Ridge/GCV obtains the best mean
+validation accuracy in the benchmark. This is relevant because validation
+accuracy is the quantity used for model selection; the test set is only used
+after the model has been selected. The defensible conclusion is therefore not
+that the prototype dominates all classical baselines, but that it is
+competitive with strong tabular methods while preserving a distinctive
+analytical output layer.
+
+\begin{figure}[H]
+\centering
+\includegraphics[width=0.95\textwidth]{runs/ridge_defense/baseline_test_accuracy.png}
+\caption{Test accuracy of ES-CFS Ridge/GCV against standard tabular baselines on the defence benchmark datasets.}
+\label{fig:ridge_baseline_test_accuracy}
+\end{figure}
+
+The average rank by test accuracy across the nine dataset/seed pairs was:
+\begin{table}[H]
+\centering
+\caption{Mean test-accuracy rank across dataset/seed pairs. Lower is better.}
+\label{tab:defence_rank_table}
+\begin{tabular}{@{}lr@{}}
+\toprule
+Model & Mean rank \\
+\midrule
+RBF SVM & $2.8889\pm2.0245$ \\
+ES-CFS Ridge+GCV & $3.4444\pm2.6294$ \\
+Random Forest & $4.1111\pm1.4487$ \\
+Linear Ridge+GCV & $4.5556\pm2.0608$ \\
+HistGradientBoosting & $4.6667\pm2.0548$ \\
+Random tanh Ridge+GCV & $4.6667\pm2.1602$ \\
+Logistic Regression & $5.0000\pm1.7638$ \\
+Gradient MLP & $6.6667\pm1.9437$ \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+This ranking gives the prototype a stronger narrative than a single accuracy
+number. ES-CFS Ridge/GCV is the second-best model by average rank, even though
+it is not the best model in every dataset. This supports the claim that the
+prototype is consistently competitive rather than accidentally strong in only
+one split.
+
+\subsubsection*{Ablation: what does the evolved representation add?}
+
+The most important architectural ablation compares three Ridge variants:
+linear input features, random tanh features, and evolved ES-CFS features.
+
+\begin{table}[H]
+\centering
+\caption{Ridge ablation over all datasets and seeds.}
+\label{tab:defence_ridge_ablation}
+\begin{tabular}{@{}lrrrr@{}}
+\toprule
+Model & Val Acc & Test Acc & Test AUC & Fit s \\
+\midrule
+Linear Ridge+GCV & $0.8751\pm0.0713$ & $0.8902\pm0.0553$ & $0.9423\pm0.0431$ & $0.0006\pm0.0001$ \\
+Random tanh Ridge+GCV & $0.8936\pm0.0622$ & $0.8742\pm0.0715$ & $0.9227\pm0.0535$ & $0.0014\pm0.0011$ \\
+ES-CFS Ridge+GCV & $\textbf{0.9299}\pm0.0627$ & $\textbf{0.9101}\pm0.0624$ & $\textbf{0.9499}\pm0.0384$ & $0.5093\pm0.2065$ \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+This is one of the clearest results for the thesis. Linear Ridge+GCV is already
+a strong baseline, which confirms the usefulness of the analytical output
+layer. Random tanh features do not reliably improve the result: they improve
+validation accuracy but reduce average test accuracy and ROC-AUC. The evolved
+ES-CFS representation is the only Ridge variant that improves validation
+accuracy, test accuracy, and ROC-AUC simultaneously. This supports the central
+claim of the prototype: the hidden representation matters, and evolutionary
+selection can produce a more useful hidden layer than either raw input features
+or random nonlinear features.
+
+\begin{figure}[H]
+\centering
+\includegraphics[width=0.95\textwidth]{runs/ridge_defense/ridge_ablation.png}
+\caption{Ridge ablation: linear input features, random tanh features, and evolved ES-CFS hidden features.}
+\label{fig:ridge_ablation}
+\end{figure}
+
+\subsubsection*{Dataset-level observations}
+
+On Ionosphere, ES-CFS Ridge/GCV obtains $0.9249\pm0.0332$ test accuracy and
+$0.9681\pm0.0248$ test ROC-AUC. RBF SVM is slightly better in test accuracy
+($0.9343\pm0.0176$), but ES-CFS Ridge/GCV obtains the best validation accuracy
+($0.9643\pm0.0000$). This is a strong result because the model selected by
+validation generalises competitively.
+
+On Sonar, ES-CFS Ridge/GCV obtains $0.8413\pm0.0489$ test accuracy, matching
+HistGradientBoosting and Random Forest and remaining close to RBF SVM and
+Logistic Regression ($0.8571$). Sonar is small and high-dimensional, so this
+result is useful evidence that the Ridge/GCV output layer remains robust under
+limited data.
+
+On Breast-W, most models perform very well. Random Forest obtains the highest
+test accuracy ($0.9714\pm0.0154$), while ES-CFS Ridge/GCV obtains
+$0.9643\pm0.0175$. Linear Ridge+GCV is already strong on this dataset
+($0.9548\pm0.0089$), suggesting that Breast-W is close to linearly separable
+after preprocessing. This also explains why the evolutionary hidden layer does
+not produce a dramatic gain there.
+
+\subsubsection*{GCV diagnostic}
+
+The lambda sensitivity diagnostic was run on Ionosphere with 64 random tanh
+features. GCV selected $\lambda_R=4.7935$, with validation accuracy $0.8750$,
+test accuracy $0.9155$, and test MSE $0.3730$. The associated figure compares
+fixed $\lambda_R$ values against the GCV-selected value. The purpose is not to
+show that GCV always picks the absolute best test $\lambda_R$; using test to
+choose $\lambda_R$ would be invalid. The point is that GCV selects a stable
+regularisation region without requiring an external hyperparameter search.
+
+\begin{figure}[H]
+\centering
+\includegraphics[width=0.95\textwidth]{runs/ridge_defense/lambda_sensitivity.png}
+\caption{Sensitivity of the Ridge output layer to fixed $\lambda_R$ values compared with the GCV-selected value.}
+\label{fig:ridge_lambda_sensitivity}
+\end{figure}
+
+\subsubsection*{Defence conclusion}
+
+The defence-oriented experiments support a balanced conclusion. The Ridge/GCV
+prototype is not a universal replacement for all tabular classifiers: an RBF
+SVM is the strongest model in average test accuracy in this benchmark. However,
+ES-CFS Ridge/GCV is close to the best classical baselines, has the best mean
+validation accuracy, ranks second overall by test-accuracy rank, and clearly
+improves over both Linear Ridge+GCV and Random tanh Ridge+GCV. Therefore, the
+scientific value of the prototype is not just its raw accuracy, but the
+demonstration that an evolved hidden representation combined with an
+analytical Ridge/GCV output layer is a competitive and interpretable hybrid
+training strategy.
+
+\begin{figure}[H]
+\centering
+\includegraphics[width=0.95\textwidth]{runs/ridge_defense/accuracy_time_tradeoff.png}
+\caption{Accuracy and fitting-time trade-off between the Ridge prototype and standard baselines.}
+\label{fig:ridge_accuracy_time_tradeoff}
+\end{figure}
+
+\subsection{Regression-Oriented Ridge Benchmark}
+\label{subsec:ridge_regression_benchmark}
+
+The Ridge/GCV output layer is naturally a least-squares regression model. For
+this reason, an additional experiment was implemented in
+\texttt{ridge\_regression\_benchmark.py} to test whether the same architectural
+idea also has value outside pure binary classification. The hidden layer is
+still evolved with the Michigan-style ES, the hidden activations are still
+fixed before solving the output layer, and the output weights are still fitted
+analytically with Ridge regression and GCV. The difference is that the target
+is now treated as a continuous variable and the checkpoint is selected by
+validation RMSE instead of validation accuracy.
+
+The experiment compares five models:
+\begin{itemize}
+    \item Linear Ridge+GCV, which tests the analytical solver without a hidden
+    representation;
+    \item Random tanh Ridge+GCV, which tests whether random nonlinear features
+    are sufficient;
+    \item ES-selected Ridge+GCV, the proposed regression version of the
+    prototype;
+    \item HistGradientBoosting, a strong non-neural tabular baseline;
+    \item a compact gradient-trained MLP.
+\end{itemize}
+
+For the ES prototype, the neuron-selection strategies CFS, OMP, and $R^2$ are
+all evaluated on the validation split. The strategy reported as
+ES-selected Ridge+GCV is the one with the lowest validation RMSE. This is
+important: the strategy is not selected using the test set.
+
+The command used was:
+\begin{verbatim}
+python ridge_regression_benchmark.py \
+  --datasets higgs friedman1 diabetes \
+  --max-samples 12000 \
+  --es-strategies cfs omp r2 \
+  --es-epochs 35 \
+  --es-mu 60 \
+  --es-offspring 180 \
+  --random-hidden-grid 32 64 128 256 \
+  --mlp-max-iter 120 \
+  --output-dir runs/ridge_regression
+\end{verbatim}
+
+The script generated:
+\begin{itemize}
+    \item \texttt{runs/ridge\_regression/summary.json}, with all raw metrics,
+    strategy candidates, histories, and test predictions;
+    \item \texttt{regression\_model\_comparison.png}, comparing test RMSE per
+    dataset;
+    \item \texttt{regression\_ridge\_value.png}, isolating the gain from the
+    evolved hidden representation;
+    \item \texttt{higgs\_predictions.png}, showing predicted numeric scores
+    against the Higgs target;
+    \item \texttt{latex\_notes.tex}, with optional figure snippets generated by
+    the script.
+\end{itemize}
+
+The significant regression plots selected for the report are the model
+comparison and the Ridge-family ablation. The additional Higgs prediction
+scatter plot remains available in
+\texttt{runs/ridge\_regression/higgs\_predictions.png}, but it is more
+diagnostic than central to the thesis argument.
+
+It is worth clarifying the role of Higgs. The OpenML Higgs dataset used here
+(\texttt{data\_id=44092}) has a binary target, so this is not a physical
+continuous-regression task. In this experiment the target is treated
+numerically as $0/1$, which tests how well the Ridge output layer can
+approximate a continuous score for a difficult large tabular problem.
+Friedman1 and Diabetes provide genuine continuous regression targets.
+
+\begin{table}[H]
+\centering
+\caption{Regression benchmark results. Lower RMSE and MAE are better; higher $R^2$ is better.}
+\label{tab:regression_benchmark_results}
+\begin{tabular}{@{}llrrrr@{}}
+\toprule
+Dataset & Model & Val RMSE & Test RMSE & Test MAE & Test $R^2$ \\
+\midrule
+Higgs-12000 & Linear Ridge+GCV & $0.4753$ & $0.4713$ & $0.4513$ & $0.1114$ \\
+Higgs-12000 & Random tanh Ridge+GCV & $0.4737$ & $0.4689$ & $0.4459$ & $0.1207$ \\
+Higgs-12000 & ES-selected Ridge+GCV & $0.4657$ & $0.4614$ & $0.4291$ & $0.1484$ \\
+Higgs-12000 & HistGradientBoosting & $\textbf{0.4398}$ & $\textbf{0.4425}$ & $\textbf{0.3893}$ & $\textbf{0.2167}$ \\
+Higgs-12000 & Gradient MLP & $0.4692$ & $0.4663$ & $0.4306$ & $0.1301$ \\
+\midrule
+Friedman1-12000 & Linear Ridge+GCV & $2.5875$ & $2.7331$ & $2.1179$ & $0.7029$ \\
+Friedman1-12000 & Random tanh Ridge+GCV & $2.5770$ & $2.7221$ & $2.0982$ & $0.7052$ \\
+Friedman1-12000 & ES-selected Ridge+GCV & $2.0607$ & $2.0698$ & $1.5889$ & $0.8296$ \\
+Friedman1-12000 & HistGradientBoosting & $\textbf{1.1337}$ & $\textbf{1.1783}$ & $\textbf{0.9332}$ & $\textbf{0.9448}$ \\
+Friedman1-12000 & Gradient MLP & $1.2190$ & $1.2783$ & $1.0155$ & $0.9350$ \\
+\midrule
+Diabetes & Linear Ridge+GCV & $60.1057$ & $54.2362$ & $43.0800$ & $0.4448$ \\
+Diabetes & Random tanh Ridge+GCV & $59.8100$ & $53.8795$ & $42.8165$ & $0.4521$ \\
+Diabetes & ES-selected Ridge+GCV & $\textbf{59.6148}$ & $\textbf{50.5444}$ & $\textbf{39.7427}$ & $\textbf{0.5178}$ \\
+Diabetes & HistGradientBoosting & $63.7560$ & $50.8650$ & $40.7029$ & $0.5117$ \\
+Diabetes & Gradient MLP & $62.1257$ & $55.9729$ & $47.1145$ & $0.4087$ \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\begin{figure}[H]
+\centering
+\includegraphics[width=0.95\textwidth]{runs/ridge_regression/regression_model_comparison.png}
+\caption{Regression benchmark test RMSE for the Ridge prototype, Ridge ablations, and external baselines. Lower values are better.}
+\label{fig:regression_model_comparison}
+\end{figure}
+
+The most important observation is the ablation within the Ridge family.
+ES-selected Ridge+GCV improves over Linear Ridge+GCV on all three datasets:
+the test RMSE reduction is approximately $2.1\%$ on Higgs, $24.3\%$ on
+Friedman1, and $6.8\%$ on Diabetes. It also improves over Random tanh
+Ridge+GCV on all three datasets: approximately $1.6\%$, $24.0\%$, and
+$6.2\%$ respectively. This shows that the value is not simply the analytical
+Ridge/GCV solve, nor merely the addition of nonlinear random features. The
+evolved hidden representation is doing useful work.
+
+\begin{figure}[H]
+\centering
+\includegraphics[width=0.95\textwidth]{runs/ridge_regression/regression_ridge_value.png}
+\caption{Regression ablation showing the gain from the evolved hidden representation over linear Ridge and random tanh Ridge.}
+\label{fig:regression_ridge_value}
+\end{figure}
+
+The reported ES-selected fit time includes the full validation sweep over
+CFS, OMP, and $R^2$: approximately $4.20$ seconds on Higgs, $4.19$ seconds on
+Friedman1, and $0.33$ seconds on Diabetes in this run. The individual
+selected-strategy time is also stored in \texttt{summary.json}. Therefore, the
+regression claim is not that the current prototype is the fastest regressor;
+the claim is that the evolved representation improves a closed-form Ridge
+output model in a measurable and traceable way.
+
+\begin{table}[H]
+\centering
+\caption{Validation-based ES strategy selection in the regression benchmark.}
+\label{tab:regression_strategy_selection}
+\begin{tabular}{@{}llrr@{}}
+\toprule
+Dataset & ES candidate & Val RMSE & Test RMSE \\
+\midrule
+Higgs-12000 & ES-CFS Ridge+GCV & $\textbf{0.4657}$ & $\textbf{0.4614}$ \\
+Higgs-12000 & ES-OMP Ridge+GCV & $0.4699$ & $0.4695$ \\
+Higgs-12000 & ES-$R^2$ Ridge+GCV & $0.4758$ & $0.4727$ \\
+\midrule
+Friedman1-12000 & ES-CFS Ridge+GCV & $2.4611$ & $2.5776$ \\
+Friedman1-12000 & ES-OMP Ridge+GCV & $\textbf{2.0607}$ & $\textbf{2.0698}$ \\
+Friedman1-12000 & ES-$R^2$ Ridge+GCV & $2.6254$ & $2.7401$ \\
+\midrule
+Diabetes & ES-CFS Ridge+GCV & $60.0524$ & $51.5248$ \\
+Diabetes & ES-OMP Ridge+GCV & $65.7605$ & $53.7444$ \\
+Diabetes & ES-$R^2$ Ridge+GCV & $\textbf{59.6148}$ & $\textbf{50.5444}$ \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+The selected strategy changes across datasets: CFS is best on Higgs, OMP is
+best on Friedman1, and $R^2$ is best on Diabetes. This confirms that neuron
+selection is a genuine design variable, not a cosmetic detail. It also
+supports the use of a validation split in the regression setting. The same
+selection that minimises validation RMSE also obtains the best test RMSE among
+the ES candidates in these three runs.
+
+Against external baselines, the result is more nuanced. HistGradientBoosting is
+the best model on Higgs and Friedman1, so the prototype should not be claimed
+as a universal state-of-the-art tabular regressor. However, the prototype is
+competitive in Higgs, where it beats the compact gradient MLP and both Ridge
+ablations, and it is the best model on Diabetes in this run. On Friedman1, the
+gap to boosting and the gradient MLP shows that the current ES budget and tanh
+representation do not yet match specialised nonlinear regression models on a
+smooth synthetic function. Nevertheless, ES-selected Ridge+GCV raises test
+$R^2$ from about $0.70$ to about $0.83$ relative to linear/random Ridge, which
+is a large architectural gain.
+
+The defensible conclusion is therefore precise: the regression experiment does
+not prove that the prototype dominates all regressors, but it does show real
+value for the proposed architecture. The evolved hidden representation
+consistently improves the analytical Ridge/GCV model, the validation-selected
+strategy generalises correctly in the tested runs, and the method can be
+competitive with compact gradient-based neural baselines while preserving the
+closed-form output-layer solve.
+
+\subsection{Multiclass Softmax Benchmark}
+\label{subsec:multiclass_softmax_benchmark}
+
+The probabilistic architecture was then extended to multiclass classification.
+For a problem with $K$ classes, the selected hidden representation is still
+written as
+$\widetilde{\boldsymbol{\Phi}}\in\mathbb{R}^{m\times(\mu+1)}$, but the output
+weights become a matrix
+\begin{equation}
+    \mathbf{B}
+    \in
+    \mathbb{R}^{(\mu+1)\times K}.
+\end{equation}
+The model computes one logit per class:
+\begin{equation}
+    \mathbf{Z}
+    =
+    \widetilde{\boldsymbol{\Phi}}\mathbf{B},
+\end{equation}
+and converts logits into class probabilities with softmax:
+\begin{equation}
+    p(y=k\mid\mathbf{x}_i)
+    =
+    \frac{
+        \exp z_{ik}
+    }{
+        \sum_{\ell=1}^{K}\exp z_{i\ell}
+    }.
+    \label{eq:softmax_benchmark}
+\end{equation}
+The predicted class is the class with maximum probability. The output layer is
+trained by minimising categorical cross-entropy:
+\begin{equation}
+    \mathcal{L}_{CE}
+    =
+    -
+    \frac{1}{m}
+    \sum_{i=1}^{m}
+    \sum_{k=1}^{K}
+    y_{ik}\log p(y=k\mid\mathbf{x}_i).
+    \label{eq:softmax_ce_benchmark}
+\end{equation}
+There is no Ridge penalty and no GCV step in this formulation.
+
+The implementation is split across two files. The module
+\texttt{logistic\_output.py} contains the softmax probability computation and
+the unregularised output-layer fit. The experimental script
+\texttt{logistic\_multiclass\_benchmark.py} reuses
+\texttt{core\_es.py} for the Michigan-style hidden layer and adds multiclass
+selection signals in \texttt{selection.py}. In the final benchmark the hidden
+neurons are selected with multiclass CFS. The relevance term is the average
+squared correlation between each neuron and the one-vs-rest class indicators,
+while the redundancy term remains squared neuron-neuron correlation.
+
+The benchmark uses three datasets:
+\begin{itemize}
+    \item \texttt{Digits}, a real 10-class dataset from scikit-learn;
+    \item \texttt{GaussianQuantiles-3000}, a controlled nonlinear 3-class
+    dataset;
+    \item \texttt{Spiral3-3000}, a controlled nonlinear 3-class spiral dataset
+    designed to make a linear softmax classifier fail.
+\end{itemize}
+The two synthetic datasets play the same role as Friedman1 in the regression
+benchmark: they test whether the architecture can learn a genuinely nonlinear
+representation under controlled conditions.
+
+The command used was:
+\begin{verbatim}
+python logistic_multiclass_benchmark.py \
+  --datasets digits gaussian-quantiles spiral-3 \
+  --max-samples 3000 \
+  --es-strategies cfs \
+  --es-epochs 55 \
+  --es-mu 128 \
+  --es-offspring 384 \
+  --random-hidden-grid 32 64 128 \
+  --output-max-iter 200 \
+  --mlp-max-iter 180 \
+  --output-dir runs/logistic_multiclass
+\end{verbatim}
+
+The script generated:
+\begin{itemize}
+    \item \texttt{runs/logistic\_multiclass/summary.json}, with raw metrics,
+    histories, and predicted probabilities;
+    \item \texttt{softmax\_model\_comparison.png}, comparing test accuracy per
+    dataset;
+    \item \texttt{softmax\_representation\_value.png}, isolating the value of
+    the evolved hidden representation;
+    \item \texttt{softmax\_probability\_metrics.png}, comparing cross-entropy
+    and multiclass Expected Calibration Error.
+\end{itemize}
+
+\begin{table}[H]
+\centering
+\caption{Multiclass softmax benchmark. Higher accuracy and macro-F1 are better; lower CE and ECE are better.}
+\label{tab:multiclass_softmax_results}
+\begin{tabular}{@{}llrrrr@{}}
+\toprule
+Dataset & Model & Test Acc & Macro-F1 & Test CE & Test ECE \\
+\midrule
+Digits & Linear Softmax CE & $0.9611$ & $0.9606$ & $0.3430$ & $0.0327$ \\
+Digits & Random tanh Softmax CE & $0.9556$ & $0.9548$ & $0.7151$ & $0.0403$ \\
+Digits & ES-CFS Softmax CE & $0.9611$ & $0.9603$ & $0.4560$ & $0.0340$ \\
+Digits & HistGradientBoosting & $0.9556$ & $0.9548$ & $\textbf{0.1398}$ & $0.0258$ \\
+Digits & Gradient MLP & $\textbf{0.9694}$ & $\textbf{0.9692}$ & $0.1572$ & $\textbf{0.0084}$ \\
+\midrule
+GaussianQuantiles-3000 & Linear Softmax CE & $0.3300$ & $0.3292$ & $1.0993$ & $0.0136$ \\
+GaussianQuantiles-3000 & Random tanh Softmax CE & $0.9950$ & $0.9950$ & $0.0201$ & $0.0045$ \\
+GaussianQuantiles-3000 & ES-CFS Softmax CE & $\textbf{0.9983}$ & $\textbf{0.9983}$ & $\textbf{0.0083}$ & $\textbf{0.0030}$ \\
+GaussianQuantiles-3000 & HistGradientBoosting & $0.9767$ & $0.9766$ & $0.0923$ & $0.0205$ \\
+GaussianQuantiles-3000 & Gradient MLP & $0.9783$ & $0.9784$ & $0.1086$ & $0.0679$ \\
+\midrule
+Spiral3-3000 & Linear Softmax CE & $0.3333$ & $0.3334$ & $1.0560$ & $0.1761$ \\
+Spiral3-3000 & Random tanh Softmax CE & $0.8550$ & $0.8553$ & $0.4803$ & $0.0464$ \\
+Spiral3-3000 & ES-CFS Softmax CE & $0.9850$ & $0.9850$ & $0.0464$ & $\textbf{0.0089}$ \\
+Spiral3-3000 & HistGradientBoosting & $\textbf{0.9900}$ & $\textbf{0.9900}$ & $\textbf{0.0451}$ & $\textbf{0.0089}$ \\
+Spiral3-3000 & Gradient MLP & $0.9883$ & $0.9883$ & $0.0775$ & $0.0424$ \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\begin{figure}[H]
+\centering
+\includegraphics[width=0.95\textwidth]{runs/logistic_multiclass/softmax_representation_value.png}
+\caption{Multiclass softmax ablation: linear softmax, random tanh features, and evolved ES-CFS hidden features.}
+\label{fig:softmax_representation_value}
+\end{figure}
+
+\begin{figure}[H]
+\centering
+\includegraphics[width=0.95\textwidth]{runs/logistic_multiclass/softmax_probability_metrics.png}
+\caption{Probability-quality metrics for the multiclass softmax benchmark.}
+\label{fig:softmax_probability_metrics}
+\end{figure}
+
+The results support a precise conclusion. On Digits, the real 10-class
+benchmark, ES-CFS Softmax CE reaches the same test accuracy as linear softmax
+($0.9611$) and improves over random tanh features and HistGradientBoosting in
+accuracy, although the gradient MLP remains the strongest model. This shows
+that the softmax architecture scales to more than two classes without changing
+the hidden-layer representation.
+
+The nonlinear datasets show the architectural value more clearly. On
+GaussianQuantiles, linear softmax fails because the class structure is not
+linearly separable, while ES-CFS Softmax CE reaches $0.9983$ test accuracy and
+the best cross-entropy. On Spiral3, linear softmax is near chance and random
+tanh features reach $0.8550$, while ES-CFS Softmax CE reaches $0.9850$ and is
+close to the best external baselines. This is the strongest evidence that the
+evolved hidden representation is useful in the probabilistic multiclass
+setting.
+
+The probability metrics add an important nuance. Softmax gives class
+probabilities by construction, so log-loss and ECE can now be measured
+directly. ES-CFS obtains very low ECE on the nonlinear datasets, but it does
+not dominate every probabilistic metric on Digits. This is consistent with the
+main trade-off of the logistic architecture: it is statistically more natural
+for classification than Ridge scores, but the output layer no longer has a
+closed-form GCV solution and can require careful optimisation and validation.
+
+\section{Limitations and Future Work}
+\label{sec:limitations}
+
+The main training entry point of the current Ridge branch remains a binary
+classifier. It thresholds one scalar score at zero and does not model
+calibrated class probabilities. The separate regression benchmark shows that
+the same Ridge/GCV output layer can also be used with continuous targets, but
+this is not yet integrated as a general training mode in \texttt{train.py}.
+The logistic experiments solve the probability issue and demonstrate a
+multiclass softmax output layer, but this currently lives in
+\texttt{logistic\_multiclass\_benchmark.py} rather than in the main training
+entry point.
+
+The selection strategies still require more systematic multi-class study.
+The current softmax benchmark implements one-vs-rest correlation relevance for
+multiclass $R^2$ and CFS, but possible extensions include:
+\begin{itemize}
+    \item mutual-information based relevance;
+    \item multi-class AUC or macro-averaged one-vs-rest AUC for CFS-AUC;
+    \item redundancy measures independent of class labels, such as Spearman or
+    Pearson neuron-neuron correlation.
+\end{itemize}
+
+The current benchmark uses three datasets and three seeds. This is stronger
+than a single split, but still not enough for a final statistical claim. A
+stronger evaluation should use more OpenML datasets, more seeds, confidence
+intervals, and paired significance tests.
+
+Finally, score stability should be studied more explicitly. The CFS result on
+Breast-W shows that a Ridge classifier can maintain high accuracy while its
+raw score MSE becomes large. Future work could include validation penalties on
+score magnitude, calibration by Platt scaling or isotonic regression, or a
+hybrid protocol where Ridge is used for efficient fitting and logistic/softmax
+is used only as a final probabilistic calibration layer.
+
+\section{Conclusion}
+\label{sec:conclusion}
+
+This project developed a Michigan-style evolutionary MLP in which each
+individual represents a single hidden neuron. The central challenge is credit
+assignment: predictions are produced by a cooperative set of neurons, so the
+algorithm must decide which individual neurons deserve to survive. Four
+selection strategies were implemented and evaluated: OMP residual selection,
+marginal $R^2$ with diversity penalty, CFS, and AUC/Spearman CFS.
+
+The Ridge/GCV architecture validates the main technical idea: evolve the hidden
+representation, then solve the output layer analytically. This preserves a
+clear difference from conventional gradient training. On the current
+multi-dataset benchmark, CFS obtains the best overall validation accuracy
+($0.9299\pm0.0627$), test accuracy ($0.9101\pm0.0624$), and ROC-AUC
+($0.9499\pm0.0384$), while CFS-AUC is strong but computationally expensive.
+The defence-oriented experiments show that the analytical Ridge/GCV output
+layer is competitive on binary tabular classification, especially when it is
+combined with an evolved hidden representation rather than raw input features
+or purely random nonlinear features.
+
+The regression-oriented benchmark extends this claim beyond binary
+classification. Using Higgs as a numeric $0/1$ score-regression task and
+Friedman1 and Diabetes as continuous regression tasks, the ES-selected
+Ridge/GCV model improves test RMSE over both Linear Ridge+GCV and Random tanh
+Ridge+GCV in all three datasets. It does not dominate HistGradientBoosting on
+the harder nonlinear benchmarks, but it demonstrates that the evolved hidden
+representation adds measurable value to the closed-form Ridge output layer.
+
+The logistic formulation remains a valuable alternative for classification:
+it returns probabilities and naturally extends to softmax for multi-class
+problems. The multiclass benchmark confirms this extension experimentally:
+ES-CFS Softmax CE reaches $0.9611$ test accuracy on Digits, $0.9983$ on
+GaussianQuantiles, and $0.9850$ on Spiral3. Its cost is equally clear: there
+is no GCV for logistic or softmax regression, so the closed-form Ridge
+advantage disappears. The thesis therefore has a clean architectural
+comparison: Ridge/GCV is analytically elegant and fast for fixed hidden
+activations, while logistic/softmax is statistically more natural for
+probabilistic classification.

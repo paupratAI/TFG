@@ -30,8 +30,8 @@ def load_dataset(
     Fitting preprocessing on the full dataset before splitting would leak
     test-set statistics into the training process.
 
-    Labels are mapped to {-1, +1} for compatibility with the Ridge
-    regression output layer.
+    Labels are mapped to {-1, +1}.  Ridge scores are later thresholded at zero,
+    with +1 treated as the positive class for ROC-AUC reporting.
 
     Parameters
     ----------
