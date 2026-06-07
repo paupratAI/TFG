@@ -1,0 +1,174 @@
+\section{Progress Report}
+\label{sec:progress_report}
+
+\setlength{\parskip}{0.6em}
+\setlength{\parindent}{0pt}
+
+\textbf{Initial aim of the project.}
+
+The initial objective of this project was to study whether a Michigan-style
+evolutionary approach could be applied to a single-hidden-layer neural network
+and still obtain competitive results on tabular problems. In a
+Pittsburgh-style evolutionary system, each individual usually represents a
+complete neural network. This makes the fitness evaluation direct, but it also
+creates a large search space because every candidate contains the parameters of
+an entire model.
+
+The proposed prototype follows a Michigan-style representation instead. Each
+individual represents one hidden neuron, and the final neural network is formed
+by the cooperative set of selected neurons. The main question was whether this
+population of individual neurons could evolve a useful hidden representation
+for binary classification and regression. This also allowed the project to
+contrast the Michigan idea with the more widely studied Pittsburgh approach,
+where complete networks are evolved directly.
+
+\textbf{Architectural idea.}
+
+The first version of the prototype used a Ridge regression output layer with
+Generalised Cross-Validation (GCV). This made the architecture easy to explain:
+the evolutionary algorithm searched for useful hidden neurons, and once the
+hidden activations were fixed, the output weights were obtained analytically.
+This separated representation learning from output-layer fitting and kept a
+clear distinction from standard backpropagation-based neural networks.
+
+Later, a second architecture was explored using an unregularised logistic or
+softmax output layer trained with cross-entropy. This was motivated by a
+conceptual limitation of Ridge classification: Ridge produces real-valued
+scores, not class probabilities. Logistic and softmax outputs are therefore
+more natural for classification, especially when extending the prototype to
+multiclass problems.
+
+\textbf{Objectives achieved.}
+
+The main implementation objective has been fulfilled. The repository now
+contains a Michigan-style evolutionary neural network where hidden neurons are
+mutated, evaluated, selected, and combined into a final hidden layer. The main
+implementation is organised around \texttt{core\_es.py},
+\texttt{selection.py}, and \texttt{train.py}.
+
+The binary classification objective has also been fulfilled. The Ridge/GCV
+architecture has been tested on datasets such as Breast-W, Ionosphere, and
+Sonar. Several neuron-selection strategies have been implemented and compared,
+including OMP, marginal $R^2$, CFS, and CFS-AUC. The current results show that
+CFS is the strongest overall strategy, obtaining the best validation accuracy,
+test accuracy, and ROC-AUC among the tested alternatives.
+
+The regression objective has also been addressed. A dedicated benchmark
+evaluates the Ridge/GCV architecture on Higgs, Friedman1, and Diabetes. The
+evolved Ridge model improves over both Linear Ridge and Random tanh Ridge on
+all three datasets in terms of test RMSE. This suggests that the evolved hidden
+representation is useful beyond binary classification.
+
+The probabilistic classification objective has been fulfilled as an alternative
+architecture. The softmax benchmark shows that the same evolved hidden
+representation can be used for multiclass classification, producing one
+probability per class and allowing metrics such as cross-entropy and Expected
+Calibration Error to be evaluated.
+
+\textbf{Objectives partially completed or abandoned.}
+
+The comparison with Pittsburgh-style evolution has been partially completed. A
+conventional genetic algorithm baseline exists in the repository, and the
+report explains the conceptual difference between Michigan and Pittsburgh
+representations. However, the strongest experimental sections currently focus
+on Ridge ablations, standard machine learning baselines, and regression or
+softmax extensions. A deeper Pittsburgh comparison remains possible but is not
+the main result of the current version.
+
+One idea was abandoned for theoretical reasons: combining logistic activation,
+cross-entropy, Ridge regularisation, and GCV in a single output layer. GCV is
+appropriate for the current Ridge formulation because Ridge regression behaves
+as a linear smoother with a meaningful effective degrees-of-freedom
+interpretation. Logistic and softmax regression do not preserve this closed
+form, so applying GCV there would not be justified. For this reason, Ridge/GCV
+and logistic/softmax are treated as two separate architectures.
+
+Another postponed idea was to make CFS-AUC the default selection strategy.
+CFS-AUC is attractive because it uses AUC as a relevance measure and
+Spearman-style redundancy, but the current experiments do not show a consistent
+enough improvement over CFS to justify replacing it.
+
+\textbf{Main problems encountered.}
+
+The first major problem has been credit assignment. In a Michigan-style system,
+a single individual is only one neuron, so its usefulness cannot be measured as
+directly as the fitness of a complete network. A neuron may only be useful in
+combination with others, or it may be individually relevant but redundant with
+neurons already selected. This motivated the implementation of several
+selection strategies, especially CFS and CFS-AUC.
+
+The second problem has been the interpretation of Ridge classification. Ridge
+with labels encoded as $\{-1,+1\}$ can work well as a least-squares
+classifier, but it does not model class probabilities. It produces scores that
+are later thresholded. This can lead to good accuracy but unstable score
+magnitudes, which is one of the reasons for studying the logistic and softmax
+alternative.
+
+The third problem has been experimental scope. During development, many plots
+and experiments were generated. The report has therefore been cleaned so that
+only the most useful figures remain: baseline comparison, Ridge ablation, GCV
+sensitivity, accuracy-time trade-off, regression comparison, regression
+ablation, softmax representation value, and probability metrics.
+
+\textbf{Current state of the work.}
+
+The project currently has a coherent Ridge/GCV architecture and a separate
+logistic/softmax alternative. The Ridge path is the most faithful to the
+original idea because it keeps the analytical output solve. The logistic path
+is more natural for classification because it returns probabilities, but it
+loses the closed-form GCV advantage.
+
+The current results support a balanced conclusion. The prototype does not
+dominate all baselines, but the evolved hidden representation adds measurable
+value. In classification, ES-CFS Ridge/GCV is close to strong models such as
+RBF SVM and Random Forest. In regression, the evolved Ridge model improves over
+simpler Ridge variants. In multiclass classification, the softmax version shows
+that the same representation idea can be extended to probability-based
+prediction.
+
+\textbf{Remaining work.}
+
+The next important extension is to test Lasso instead of Ridge, or as a
+complement to Ridge. Until now, regularisation has mainly been used to weight
+the selected neurons. Ridge shrinks coefficients but usually keeps all neurons
+active. Lasso can set some output coefficients exactly to zero, which would
+create a second filtering stage after the evolutionary selection process.
+
+This is especially relevant because the current method already selects a small
+set of neurons from a larger candidate pool. For example, a typical
+configuration may keep around 50 neurons from approximately 400 candidates.
+Lasso could remove some of these surviving neurons at the output layer,
+producing a smaller and potentially more interpretable model. The experiment
+should compare predictive performance, sparsity, and the final number of active
+neurons.
+
+Another pending task is to repeat the most important experiments with ten
+random seeds. This would make the empirical comparison more robust and would
+allow the final report to include mean validation accuracy, mean test accuracy,
+and standard error, especially when comparing the Ridge and logistic
+architectures.
+
+The final thesis also needs clear pseudocode for the training algorithm. This
+should describe population initialisation, mutation, offspring generation,
+hidden activation computation, neuron selection, output-layer fitting,
+validation evaluation, and checkpoint selection. A theoretical cost analysis is
+also still missing, separating the cost of hidden activations, selection,
+Ridge/GCV solving, and logistic or softmax fitting.
+
+Finally, the thesis should include a visual diagram of the architecture. The
+figure should show the input data, the candidate hidden neurons, the selected
+hidden layer, the activation matrix, and the output layer. For Ridge, the
+output block should show the analytical Ridge/GCV solve. For logistic and
+softmax, it should show the probabilistic output layer. This diagram can be
+created with the help of a generative AI tool to make the final memory easier
+to understand visually.
+
+\textbf{Final assessment.}
+
+At this stage, the project has achieved its main technical goals. The
+Michigan-style formulation has been implemented and evaluated, the Ridge/GCV
+architecture has been validated on classification and regression, and the
+logistic/softmax architecture has been tested on multiclass classification.
+The remaining work should focus on strengthening the final argument: testing
+Lasso, increasing the number of seeds, adding pseudocode, analysing
+computational cost, and creating a clear architecture diagram.

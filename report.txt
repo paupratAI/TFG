@@ -1264,6 +1264,132 @@ strategy generalises correctly in the tested runs, and the method can be
 competitive with compact gradient-based neural baselines while preserving the
 closed-form output-layer solve.
 
+\subsection{Lasso Output-Layer Filtering Experiment}
+\label{subsec:lasso_filtering_experiment}
+
+The Ridge/GCV experiments show that the evolved hidden representation is useful,
+but the final Ridge output layer keeps all selected neurons active. Ridge
+regularisation shrinks the hidden-to-output weights, but it does not normally
+remove neurons completely. For this reason, an additional experiment was added
+in \texttt{lasso\_filter\_benchmark.py} to test Lasso as a second filtering
+stage after the Michigan selection step.
+
+The motivation is architectural. During each ES generation, the current
+configuration selects $\mu=50$ neurons from a larger parent-plus-offspring pool.
+In the Lasso experiment the pool contains $50+350=400$ candidate neurons. The
+Michigan fitness step therefore performs a first filtering stage, reducing the
+candidate pool to 50 surviving hidden neurons. Lasso is then applied at the
+output layer to test whether some of those 50 survivors are still redundant.
+Unlike Ridge, Lasso can set output coefficients exactly to zero, so the final
+model may use fewer hidden neurons.
+
+The experiment compares three output-layer variants on exactly the same
+ES-CFS hidden representation:
+\begin{itemize}
+    \item Full ES-CFS Ridge+GCV, which keeps all 50 evolved neurons and fits the
+    output layer with the usual analytical Ridge/GCV solve.
+    \item ES-CFS Lasso, which fits a sparse least-squares output layer directly
+    on the selected hidden activations.
+    \item Lasso-screened ES-CFS Ridge+GCV, which first uses Lasso to identify
+    active neurons and then refits Ridge+GCV only on that active subset.
+\end{itemize}
+
+Hidden activations are standardised using the training split before fitting the
+output layer. This is important because Lasso is scale-sensitive. The scaler is
+fitted only on the training hidden activations and then applied to validation
+and test activations, so no validation or test leakage is introduced. The Lasso
+regularisation parameter $\alpha$ is selected on the validation split from a
+logarithmic grid of 42 values between $10^{-5}$ and approximately $5\cdot10^{-1}$.
+The final selection rule is validation-based and sparsity-aware: it maximises
+\[
+    \mathrm{ValAcc} - 0.05 \cdot
+    \frac{\#\mathrm{active\ neurons}}{50}.
+\]
+This criterion keeps validation accuracy as the main objective, while giving a
+small explicit reward to output layers that use fewer hidden neurons. The test
+set is not used to choose $\alpha$.
+
+The command used was:
+\begin{verbatim}
+python lasso_filter_benchmark.py \
+  --datasets ionosphere sonar breast-w \
+  --seeds 42 43 44 45 46 47 48 49 50 51 \
+  --es-epochs 60 \
+  --es-mu 50 \
+  --es-offspring 350 \
+  --alpha-points 42 \
+  --selection-rule sparsity_penalty \
+  --sparsity-penalty 0.05 \
+  --output-dir runs/lasso_filter
+\end{verbatim}
+
+The script generated:
+\begin{itemize}
+    \item \texttt{runs/lasso\_filter/summary.json}, with the selected rows and
+    all Lasso candidates;
+    \item \texttt{lasso\_accuracy\_sparsity.png}, comparing validation
+    accuracy, test accuracy, and active hidden neurons;
+    \item \texttt{lasso\_dataset\_sparsity.png}, showing the number of active
+    neurons per dataset;
+    \item \texttt{latex\_notes.tex}, with a compact figure snippet.
+\end{itemize}
+
+\begin{table}[H]
+\centering
+\caption{Lasso filtering experiment over Breast-W, Ionosphere, and Sonar with ten seeds. Higher validation/test accuracy and ROC-AUC are better; fewer active neurons indicate a sparser output layer.}
+\label{tab:lasso_filtering_results}
+\begin{tabular}{@{}lrrrrr@{}}
+\toprule
+Output layer & Val Acc & Test Acc & Test AUC & Active neurons & Active fraction \\
+\midrule
+Full ES-CFS Ridge+GCV & $0.9176\pm0.0709$ & $\textbf{0.9025}\pm0.0772$ & $0.9485\pm0.0471$ & $50.00\pm0.00$ & $1.000\pm0.000$ \\
+ES-CFS Lasso & $\textbf{0.9294}\pm0.0579$ & $0.9003\pm0.0784$ & $\textbf{0.9541}\pm0.0537$ & $22.13\pm13.88$ & $0.443\pm0.278$ \\
+Lasso-screened ES-CFS Ridge+GCV & $0.9285\pm0.0584$ & $0.9023\pm0.0760$ & $0.9499\pm0.0541$ & $\textbf{18.57}\pm12.76$ & $\textbf{0.371}\pm0.255$ \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\begin{figure}[H]
+\centering
+\includegraphics[width=0.95\textwidth]{runs/lasso_filter/lasso_accuracy_sparsity.png}
+\caption{Lasso as a second output-layer filter after Michigan ES selection. The panels compare validation accuracy, test accuracy, and the number of active hidden neurons.}
+\label{fig:lasso_accuracy_sparsity}
+\end{figure}
+
+The result is useful because it shows a real accuracy/sparsity trade-off rather
+than a trivial compression failure. Full Ridge+GCV remains the best model by
+mean test accuracy, but the margin is small: $0.9025$ for full Ridge, $0.9023$
+for Lasso-screened Ridge, and $0.9003$ for direct Lasso. The validation
+accuracies tell a complementary story. Direct Lasso and Lasso-screened Ridge
+obtain higher mean validation accuracy than full Ridge, $0.9294$ and $0.9285$
+against $0.9176$. This is important because the sparse models are not selected
+by test accuracy; their selection is validation-driven.
+
+The sparsity gain is substantial. Direct Lasso keeps 22.13 active neurons on
+average, while Lasso-screened Ridge keeps 18.57. This corresponds to keeping
+approximately $44.3\%$ and $37.1\%$ of the selected hidden layer respectively.
+In other words, Lasso removes more than half of the neurons selected by the ES
+stage while preserving almost the same test accuracy and even slightly
+improving mean ROC-AUC in the direct Lasso case.
+
+The dataset-level behaviour gives a more precise interpretation. On Breast-W,
+Lasso-screened Ridge obtains $0.9693$ mean test accuracy with only 5.40 active
+neurons, compared with $0.9600$ and 50 neurons for full Ridge. On Sonar, direct Lasso
+also slightly improves mean test accuracy, from $0.8095$ to $0.8119$, while
+using 28.20 active neurons. On Ionosphere, full Ridge remains better in test
+accuracy, $0.9380$ versus $0.9282$ for Lasso-screened Ridge and $0.9211$ for
+direct Lasso, so aggressive sparsification is not always free. This is an
+important limitation: Lasso is not a universal replacement for Ridge, but a
+useful compression and interpretability mechanism.
+
+The Lasso-screened Ridge variant is also informative. It obtains the best
+sparsity/test-accuracy balance and the sparsest average model, while its test
+accuracy is almost tied with full Ridge. Therefore, the strongest conclusion is
+not that Lasso should replace Ridge, but that it provides a valuable second
+filtering mechanism. It can substantially reduce the final hidden layer while
+keeping validation and test accuracy close to the full analytical Ridge/GCV
+model.
+
 \subsection{Multiclass Softmax Benchmark}
 \label{subsec:multiclass_softmax_benchmark}
 
@@ -1447,10 +1573,19 @@ multiclass $R^2$ and CFS, but possible extensions include:
     Pearson neuron-neuron correlation.
 \end{itemize}
 
-The current benchmark uses three datasets and three seeds. This is stronger
-than a single split, but still not enough for a final statistical claim. A
-stronger evaluation should use more OpenML datasets, more seeds, confidence
-intervals, and paired significance tests.
+Most benchmark sections use three datasets and three seeds. This is stronger
+than a single split, but still not enough for a final statistical claim. The
+Lasso filtering experiment has been expanded to ten seeds, but a stronger final
+evaluation should still use more OpenML datasets, confidence intervals, and
+paired significance tests across the main architectures.
+
+The Lasso filtering experiment is also limited to the binary Ridge setting and
+to the same three benchmark datasets. Its value is that it demonstrates a
+promising sparsity mechanism, not that Lasso should always replace Ridge. A
+more complete study should evaluate Lasso and Lasso-screened Ridge with more
+datasets and a paired statistical test against the full Ridge/GCV output
+layer. It would also be useful to study whether the Lasso-selected active
+neurons are stable across seeds.
 
 Finally, score stability should be studied more explicitly. The CFS result on
 Breast-W shows that a Ridge classifier can maintain high accuracy while its
@@ -1487,6 +1622,18 @@ Ridge/GCV model improves test RMSE over both Linear Ridge+GCV and Random tanh
 Ridge+GCV in all three datasets. It does not dominate HistGradientBoosting on
 the harder nonlinear benchmarks, but it demonstrates that the evolved hidden
 representation adds measurable value to the closed-form Ridge output layer.
+
+The Lasso filtering experiment adds a sparsity perspective to this conclusion.
+After the ES stage has selected 50 hidden neurons from a pool of 400
+candidates, Lasso can remove more than half of the surviving neurons while
+keeping validation and test accuracy close to full Ridge/GCV. In the ten-seed
+experiment, direct Lasso reduces the average active hidden layer from 50 to
+22.13 neurons, with mean test accuracy moving only from $0.9025$ to $0.9003$
+and mean ROC-AUC increasing from $0.9485$ to $0.9541$. The Lasso-screened Ridge
+variant is even sparser on average, with 18.57 active neurons and $0.9023$ mean
+test accuracy. This does not make Lasso a universal replacement for Ridge, but
+it shows that the final model can be made substantially sparser without
+destroying predictive performance.
 
 The logistic formulation remains a valuable alternative for classification:
 it returns probabilities and naturally extends to softmax for multi-class

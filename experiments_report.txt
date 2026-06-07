@@ -1,0 +1,689 @@
+% Experiments-only LaTeX report.
+% This file is intended to be included in the final thesis memory.
+
+\section{Experimental Report}
+\label{sec:experimental_report}
+
+This section collects the main experiments carried out during the project. It is
+written as a self-contained summary, so the tested models are briefly described
+before presenting the results. The common idea behind the prototype is to build
+a hidden layer made of nonlinear tanh neurons, select useful neurons with a
+Michigan-style evolutionary process, and then train a simple output layer on top
+of the selected representation. Most experiments use a Ridge output layer with
+GCV-based regularisation. One experiment replaces Ridge with a softmax output
+trained with cross-entropy, and the final experiment returns to the original
+motivation of the project: comparing the Michigan representation with a
+Pittsburgh-style evolutionary representation.
+
+\subsection{Experiment 1: Ridge/GCV Fitness Strategy Comparison}
+\label{subsec:exp_strategy_comparison}
+
+The first experiment compares the different strategies used to select hidden
+neurons inside the Michigan-style population. This is important because, in
+this architecture, one individual is only one neuron and not a complete neural
+network. Therefore, the algorithm needs a criterion to decide which neurons are
+useful enough to survive. The compared strategies are OMP, marginal $R^2$ with
+diversity penalty, CFS, and CFS-AUC.
+
+OMP selects neurons greedily according to how much they help to explain the
+current residual, so it behaves like a sparse forward-selection method. The
+marginal $R^2$ strategy gives high fitness to neurons that individually explain
+the target well, while adding a diversity penalty to avoid keeping many neurons
+that behave almost the same. CFS is a correlation-based criterion: it rewards
+neurons that are correlated with the target and penalises redundancy between
+neurons. CFS-AUC is the modified version introduced during the project; it uses
+univariate AUC as the relevance term and Spearman correlation as the redundancy
+term, which makes the criterion more directly related to binary classification.
+
+The global results over Breast-W, Ionosphere, and Sonar are shown in
+Table~\ref{tab:exp_strategy_overall}.
+
+\begin{table}[H]
+\centering
+\caption{Overall Ridge/GCV strategy comparison across Breast-W, Ionosphere, and Sonar. Values are mean $\pm$ standard deviation over datasets and seeds.}
+\label{tab:exp_strategy_overall}
+\begin{tabular}{@{}lrrrrr@{}}
+\toprule
+Strategy & Val Acc & Test Acc & Test MSE & Test AUC & Final GCV \\
+\midrule
+OMP & $0.8982\pm0.0701$ & $0.8742\pm0.0804$ & $0.4701\pm0.2387$ & $0.9092\pm0.0601$ & $0.0675\pm0.0338$ \\
+$R^2$ & $0.9025\pm0.0656$ & $0.8773\pm0.0809$ & $0.3271\pm0.1691$ & $0.9434\pm0.0396$ & $0.2719\pm0.1792$ \\
+CFS & $\textbf{0.9299}\pm0.0627$ & $\textbf{0.9101}\pm0.0624$ & $4.2004\pm10.8578$ & $\textbf{0.9499}\pm0.0384$ & $0.1936\pm0.1514$ \\
+CFS-AUC & $0.9070\pm0.0656$ & $0.8855\pm0.0680$ & $0.3425\pm0.1943$ & $0.9442\pm0.0422$ & $0.1770\pm0.0756$ \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+The best overall strategy is CFS. It obtains the highest validation accuracy,
+test accuracy, and ROC-AUC, so it makes sense to use it as the main strategy in
+the later Ridge experiments. The only weak point is the high MSE variance,
+which means that Ridge scores can sometimes have unstable magnitudes even when
+the final classification is correct. CFS-AUC is still interesting because it
+uses AUC and Spearman-style redundancy, but in these experiments it is more
+expensive and does not clearly beat CFS.
+
+\subsection{Experiment 2: Ridge/GCV Against Standard Tabular Baselines}
+\label{subsec:exp_ridge_baselines}
+
+The second experiment checks whether the proposed ES-CFS Ridge/GCV model is
+competitive when compared with standard tabular machine-learning methods. The
+goal is not to claim that the prototype is always the best model, but to see
+whether it is close to strong baselines such as RBF SVM, Random Forest, and
+HistGradientBoosting.
+
+In this comparison, ES-CFS Ridge/GCV is the main prototype: the hidden neurons
+are selected by the evolutionary CFS strategy and the final output weights are
+computed with Ridge regression, with the regularisation parameter selected by
+GCV. RBF SVM is a kernel Support Vector Machine with a radial basis function
+kernel, which is a strong nonlinear classifier for small tabular datasets.
+Random Forest is an ensemble of decision trees trained on bootstrapped samples,
+and HistGradientBoosting is a gradient-boosted tree model optimised for tabular
+data. Logistic Regression is included as a simple linear probabilistic baseline.
+Linear Ridge+GCV removes the hidden layer completely and applies Ridge directly
+to the original features. Random tanh Ridge+GCV keeps the same Ridge output
+layer but uses random nonlinear hidden neurons instead of evolved ones. Finally,
+Gradient MLP is a conventional neural network trained by backpropagation, used
+to compare the prototype against the more standard neural-network training
+approach.
+
+Table~\ref{tab:exp_defence_baselines} and
+Figure~\ref{fig:exp_ridge_baseline_accuracy} summarise the main benchmark.
+
+\begin{table}[H]
+\centering
+\caption{Defence benchmark: ES-CFS Ridge/GCV against standard tabular baselines.}
+\label{tab:exp_defence_baselines}
+\begin{tabular}{@{}lrrrr@{}}
+\toprule
+Model & Val Acc & Test Acc & Test AUC & Fit s \\
+\midrule
+RBF SVM & $0.9163\pm0.0554$ & $\textbf{0.9178}\pm0.0480$ & $\textbf{0.9768}\pm0.0181$ & $0.0006\pm0.0001$ \\
+Random Forest & $0.9028\pm0.0626$ & $0.9110\pm0.0589$ & $0.9701\pm0.0287$ & $0.1421\pm0.0141$ \\
+ES-CFS Ridge+GCV & $\textbf{0.9299}\pm0.0627$ & $0.9101\pm0.0624$ & $0.9499\pm0.0384$ & $0.5093\pm0.2065$ \\
+HistGradientBoosting & $0.9001\pm0.0522$ & $0.9078\pm0.0561$ & $0.9656\pm0.0253$ & $0.0506\pm0.0142$ \\
+Logistic Regression & $0.8615\pm0.1009$ & $0.8951\pm0.0601$ & $0.9273\pm0.0540$ & $0.0013\pm0.0004$ \\
+Linear Ridge+GCV & $0.8751\pm0.0713$ & $0.8902\pm0.0553$ & $0.9423\pm0.0431$ & $0.0006\pm0.0001$ \\
+Random tanh Ridge+GCV & $0.8936\pm0.0622$ & $0.8742\pm0.0715$ & $0.9227\pm0.0535$ & $0.0014\pm0.0011$ \\
+Gradient MLP & $0.8723\pm0.0850$ & $0.8588\pm0.0945$ & $0.9195\pm0.0755$ & $0.0217\pm0.0087$ \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\begin{figure}[H]
+\centering
+\includegraphics[width=0.95\textwidth]{runs/ridge_defense/baseline_test_accuracy.png}
+\caption{Test accuracy of the Ridge prototype against standard tabular baselines.}
+\label{fig:exp_ridge_baseline_accuracy}
+\end{figure}
+
+\begin{figure}[H]
+\centering
+\includegraphics[width=0.90\textwidth]{runs/ridge_defense/test_accuracy_ranking.png}
+\caption{Average test-accuracy ranking across dataset/seed pairs. Lower rank is better.}
+\label{fig:exp_ridge_accuracy_ranking}
+\end{figure}
+
+The strongest model in mean test accuracy is RBF SVM, with $0.9178$, but the
+prototype is very close with $0.9101$. It is also important that ES-CFS
+Ridge/GCV obtains the best mean validation accuracy. Since validation accuracy
+is used for model selection, this gives the result more credibility. The rank
+plot also helps: the prototype is not only good in one isolated case, but is
+consistently competitive across the evaluated dataset/seed pairs.
+
+\subsection{Experiment 3: Ridge-Family Ablation}
+\label{subsec:exp_ridge_ablation}
+
+This experiment isolates the contribution of the evolved hidden representation.
+For that, three Ridge variants are compared: Ridge directly on the input
+features, Ridge on random tanh features, and Ridge on the evolved ES-CFS hidden
+features. This is useful because it tells us whether the evolutionary layer is
+actually adding value. Linear Ridge+GCV is the simplest version, because the
+model only learns a regularised linear combination of the original variables.
+Random tanh Ridge+GCV adds nonlinear neurons, but their parameters are not
+optimised, so it tests whether nonlinearity alone is enough. ES-CFS Ridge+GCV
+uses the same number of hidden neurons as the random version, but they have been
+selected by the evolutionary fitness function, so any improvement can be
+attributed to the learned representation rather than only to the Ridge solver.
+
+\begin{table}[H]
+\centering
+\caption{Ridge-family ablation over all defence benchmark runs.}
+\label{tab:exp_ridge_ablation}
+\begin{tabular}{@{}lrrrr@{}}
+\toprule
+Model & Val Acc & Test Acc & Test AUC & Fit s \\
+\midrule
+Linear Ridge+GCV & $0.8751\pm0.0713$ & $0.8902\pm0.0553$ & $0.9423\pm0.0431$ & $0.0006\pm0.0001$ \\
+Random tanh Ridge+GCV & $0.8936\pm0.0622$ & $0.8742\pm0.0715$ & $0.9227\pm0.0535$ & $0.0014\pm0.0011$ \\
+ES-CFS Ridge+GCV & $\textbf{0.9299}\pm0.0627$ & $\textbf{0.9101}\pm0.0624$ & $\textbf{0.9499}\pm0.0384$ & $0.5093\pm0.2065$ \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\begin{figure}[H]
+\centering
+\includegraphics[width=0.95\textwidth]{runs/ridge_defense/ridge_ablation.png}
+\caption{Ablation of the Ridge family: raw input features, random tanh features, and evolved ES-CFS hidden features.}
+\label{fig:exp_ridge_ablation}
+\end{figure}
+
+This is one of the clearest results of the whole project. Linear Ridge is
+already a strong baseline, but the evolved representation improves validation
+accuracy, test accuracy, and ROC-AUC at the same time. Random tanh features do
+not provide the same improvement. This means that the gain does not come simply
+from adding nonlinear features, but from selecting useful nonlinear features.
+
+\subsection{Experiment 4: GCV Regularisation Diagnostic}
+\label{subsec:exp_gcv_diagnostic}
+
+The fourth experiment studies the behaviour of GCV when choosing the Ridge
+regularisation parameter. This is relevant because one of the strengths of the
+Ridge architecture is that the output layer can be solved analytically and
+$\lambda_R$ can be selected without using the test set. In this experiment the
+hidden layer is kept fixed after ES-CFS selection, and only the output-layer
+regularisation is changed. This separates the effect of the analytical Ridge
+solver from the effect of the evolutionary neuron selection.
+
+\begin{figure}[H]
+\centering
+\includegraphics[width=0.95\textwidth]{runs/ridge_defense/lambda_sensitivity.png}
+\caption{Sensitivity of the Ridge output layer to fixed $\lambda_R$ values compared with the GCV-selected value.}
+\label{fig:exp_lambda_sensitivity}
+\end{figure}
+
+The diagnostic shows that GCV selects a stable regularisation region. The point
+is not that GCV always chooses the best possible test value, because using test
+performance to choose $\lambda_R$ would be invalid. What matters is that GCV
+provides an automatic and principled way to select the regularisation parameter
+once the hidden activations are fixed. This supports the analytical character
+of the Ridge/GCV architecture.
+
+\subsection{Experiment 5: Accuracy--Time Trade-Off}
+\label{subsec:exp_accuracy_time}
+
+This experiment looks at the computational cost of the prototype. The Ridge
+output solve is fast once the hidden activations are known, but the
+evolutionary search for useful neurons is more expensive. The goal is to see
+where the prototype is placed when both accuracy and fitting time are taken
+into account. For the prototype, fitting time includes the hidden-neuron search
+and the final Ridge/GCV output solve. For the external baselines, it corresponds
+to the standard training time of each scikit-learn model on the same data split.
+
+\begin{figure}[H]
+\centering
+\includegraphics[width=0.95\textwidth]{runs/ridge_defense/accuracy_time_tradeoff.png}
+\caption{Accuracy and fitting-time trade-off between the Ridge prototype and standard baselines.}
+\label{fig:exp_accuracy_time}
+\end{figure}
+
+The prototype is not the fastest model in the comparison. This is expected,
+because the evolutionary hidden-layer search dominates the runtime. However,
+its accuracy is close to strong tabular baselines. Therefore, the value of the
+prototype is not that it is the cheapest classifier, but that it combines
+evolutionary representation learning with an analytical Ridge/GCV output
+layer.
+
+\subsection{Experiment 6: Regression-Oriented Ridge Benchmark}
+\label{subsec:exp_regression}
+
+The sixth experiment tests whether the Ridge/GCV architecture also has value in
+regression. This is a natural question because the Ridge output layer is
+originally a least-squares regressor. The experiment uses Higgs as a numeric
+$0/1$ score-regression task, and Friedman1 and Diabetes as continuous
+regression datasets.
+
+The compared models follow the same logic as in the classification ablation.
+Linear Ridge+GCV predicts the target directly from the original input features.
+Random tanh Ridge+GCV first maps the input through randomly generated tanh
+neurons and then fits Ridge on those random features. ES-selected Ridge+GCV uses
+the Michigan evolutionary stage to choose the nonlinear hidden neurons before
+the Ridge output layer is fitted. HistGradientBoosting is a tree-based
+boosting model that is usually very strong on tabular regression problems, and
+Gradient MLP is a standard neural network trained with gradient descent. This
+experiment therefore checks both whether the prototype improves over simpler
+Ridge variants and whether it is competitive with common nonlinear regressors.
+
+\begin{table}[H]
+\centering
+\caption{Regression benchmark results. Lower RMSE and MAE are better; higher $R^2$ is better.}
+\label{tab:exp_regression_results}
+\begin{tabular}{@{}llrrrr@{}}
+\toprule
+Dataset & Model & Val RMSE & Test RMSE & Test MAE & Test $R^2$ \\
+\midrule
+Higgs-12000 & Linear Ridge+GCV & $0.4753$ & $0.4713$ & $0.4513$ & $0.1114$ \\
+Higgs-12000 & Random tanh Ridge+GCV & $0.4737$ & $0.4689$ & $0.4459$ & $0.1207$ \\
+Higgs-12000 & ES-selected Ridge+GCV & $0.4657$ & $0.4614$ & $0.4291$ & $0.1484$ \\
+Higgs-12000 & HistGradientBoosting & $\textbf{0.4398}$ & $\textbf{0.4425}$ & $\textbf{0.3893}$ & $\textbf{0.2167}$ \\
+Higgs-12000 & Gradient MLP & $0.4692$ & $0.4663$ & $0.4306$ & $0.1301$ \\
+\midrule
+Friedman1-12000 & Linear Ridge+GCV & $2.5875$ & $2.7331$ & $2.1179$ & $0.7029$ \\
+Friedman1-12000 & Random tanh Ridge+GCV & $2.5770$ & $2.7221$ & $2.0982$ & $0.7052$ \\
+Friedman1-12000 & ES-selected Ridge+GCV & $2.0607$ & $2.0698$ & $1.5889$ & $0.8296$ \\
+Friedman1-12000 & HistGradientBoosting & $\textbf{1.1337}$ & $\textbf{1.1783}$ & $\textbf{0.9332}$ & $\textbf{0.9448}$ \\
+Friedman1-12000 & Gradient MLP & $1.2190$ & $1.2783$ & $1.0155$ & $0.9350$ \\
+\midrule
+Diabetes & Linear Ridge+GCV & $60.1057$ & $54.2362$ & $43.0800$ & $0.4448$ \\
+Diabetes & Random tanh Ridge+GCV & $59.8100$ & $53.8795$ & $42.8165$ & $0.4521$ \\
+Diabetes & ES-selected Ridge+GCV & $\textbf{59.6148}$ & $\textbf{50.5444}$ & $\textbf{39.7427}$ & $\textbf{0.5178}$ \\
+Diabetes & HistGradientBoosting & $63.7560$ & $50.8650$ & $40.7029$ & $0.5117$ \\
+Diabetes & Gradient MLP & $62.1257$ & $55.9729$ & $47.1145$ & $0.4087$ \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\begin{figure}[H]
+\centering
+\includegraphics[width=0.95\textwidth]{runs/ridge_regression/regression_model_comparison.png}
+\caption{Regression benchmark test RMSE for the Ridge prototype, Ridge ablations, and external baselines.}
+\label{fig:exp_regression_comparison}
+\end{figure}
+
+\begin{figure}[H]
+\centering
+\includegraphics[width=0.95\textwidth]{runs/ridge_regression/regression_ridge_value.png}
+\caption{Regression ablation showing the gain from the evolved hidden representation over linear Ridge and random tanh Ridge.}
+\label{fig:exp_regression_value}
+\end{figure}
+
+\begin{figure}[H]
+\centering
+\includegraphics[width=0.90\textwidth]{runs/ridge_regression/higgs_predictions.png}
+\caption{Diagnostic Higgs plot: predicted numeric scores against the target for representative models.}
+\label{fig:exp_higgs_predictions}
+\end{figure}
+
+The evolved Ridge model improves over Linear Ridge and Random tanh Ridge on all
+three datasets. The improvement is especially clear on Friedman1, where the
+test $R^2$ increases from around $0.70$ to around $0.83$. However,
+HistGradientBoosting is still stronger on Higgs and Friedman1. For that
+reason, the right conclusion is not that the prototype is the best regressor,
+but that the evolved representation adds measurable value to the closed-form
+Ridge output model.
+
+\subsection{Experiment 7: Validation-Based Regression Strategy Selection}
+\label{subsec:exp_regression_strategy_selection}
+
+This experiment looks more closely at the regression benchmark and asks whether
+the same neuron-selection strategy works best for every regression dataset.
+This matters because the Michigan-style architecture depends heavily on
+credit-assignment, and different problems may require different selection
+criteria. ES-CFS, ES-OMP, and ES-$R^2$ all use the same final Ridge/GCV output
+layer; what changes is only the fitness rule used to decide which hidden
+neurons are kept. This makes the comparison useful because it isolates the
+selection criterion from the output model.
+
+\begin{table}[H]
+\centering
+\caption{Validation-based ES strategy selection in the regression benchmark. Lower RMSE is better.}
+\label{tab:exp_regression_strategy_selection}
+\begin{tabular}{@{}llrr@{}}
+\toprule
+Dataset & ES candidate & Val RMSE & Test RMSE \\
+\midrule
+Higgs-12000 & ES-CFS Ridge+GCV & $\textbf{0.4657}$ & $\textbf{0.4614}$ \\
+Higgs-12000 & ES-OMP Ridge+GCV & $0.4699$ & $0.4695$ \\
+Higgs-12000 & ES-$R^2$ Ridge+GCV & $0.4758$ & $0.4727$ \\
+\midrule
+Friedman1-12000 & ES-CFS Ridge+GCV & $2.4611$ & $2.5776$ \\
+Friedman1-12000 & ES-OMP Ridge+GCV & $\textbf{2.0607}$ & $\textbf{2.0698}$ \\
+Friedman1-12000 & ES-$R^2$ Ridge+GCV & $2.6254$ & $2.7401$ \\
+\midrule
+Diabetes & ES-CFS Ridge+GCV & $60.0524$ & $51.5248$ \\
+Diabetes & ES-OMP Ridge+GCV & $65.7605$ & $53.7444$ \\
+Diabetes & ES-$R^2$ Ridge+GCV & $\textbf{59.6148}$ & $\textbf{50.5444}$ \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+The best strategy changes depending on the dataset. CFS is best on Higgs, OMP
+is best on Friedman1, and $R^2$ is best on Diabetes. This is useful evidence
+because it shows that neuron selection is a real design choice, not a cosmetic
+hyperparameter. The validation split also behaves well here: in all three
+datasets, the strategy with the best validation RMSE also obtains the best test
+RMSE among the ES candidates.
+
+\subsection{Experiment 8: Lasso Output-Layer Filtering}
+\label{subsec:exp_lasso}
+
+The eighth experiment studies whether Lasso can be used as a second filtering
+stage after the Michigan selection step. The ES already selects 50 neurons from
+a larger pool of 400 candidates. Lasso can then remove some of these surviving
+neurons by setting their output coefficients to zero.
+
+Three output-layer variants are compared. Full ES-CFS Ridge+GCV is the original
+model, where all 50 selected neurons remain active and the output layer is a
+Ridge model. ES-CFS Lasso replaces the Ridge output with a Lasso output, so the
+same selected hidden layer is used but some output weights can become exactly
+zero. Lasso-screened ES-CFS Ridge+GCV uses Lasso only as a filter: first it
+identifies the active neurons, and then Ridge+GCV is fitted again using only
+those remaining neurons. This last version is interesting because it tries to
+combine Lasso sparsity with the stability of the Ridge output layer.
+
+\begin{table}[H]
+\centering
+\caption{Lasso filtering experiment over Breast-W, Ionosphere, and Sonar with ten seeds.}
+\label{tab:exp_lasso_results}
+\resizebox{\textwidth}{!}{%
+\begin{tabular}{@{}lrrrrr@{}}
+\toprule
+Output layer & Val Acc & Test Acc & Test AUC & Active neurons & Active fraction \\
+\midrule
+Full ES-CFS Ridge+GCV & $0.9176\pm0.0709$ & $\textbf{0.9025}\pm0.0772$ & $0.9485\pm0.0471$ & $50.00\pm0.00$ & $1.000\pm0.000$ \\
+ES-CFS Lasso & $\textbf{0.9294}\pm0.0579$ & $0.9003\pm0.0784$ & $\textbf{0.9541}\pm0.0537$ & $22.13\pm13.88$ & $0.443\pm0.278$ \\
+Lasso-screened ES-CFS Ridge+GCV & $0.9285\pm0.0584$ & $0.9023\pm0.0760$ & $0.9499\pm0.0541$ & $\textbf{18.57}\pm12.76$ & $\textbf{0.371}\pm0.255$ \\
+\bottomrule
+\end{tabular}%
+}
+\end{table}
+
+\begin{figure}[H]
+\centering
+\includegraphics[width=0.95\textwidth]{runs/lasso_filter/lasso_accuracy_sparsity.png}
+\caption{Lasso output filtering after Michigan ES selection. The panels compare validation accuracy, test accuracy, and active hidden neurons.}
+\label{fig:exp_lasso_accuracy_sparsity}
+\end{figure}
+
+This experiment gives a strong sparsity result. Full Ridge+GCV has the best
+mean test accuracy, but only by a very small margin: $0.9025$ versus $0.9023$
+for Lasso-screened Ridge. The Lasso-screened model uses only 18.57 active
+neurons on average, compared with 50 for full Ridge. Direct Lasso also improves
+mean ROC-AUC from $0.9485$ to $0.9541$ while using 22.13 active neurons. This
+makes Lasso useful as a compression and interpretability mechanism, even if it
+does not completely replace Ridge.
+
+\subsection{Experiment 9: Dataset-Level Lasso Behaviour}
+\label{subsec:exp_lasso_dataset_behaviour}
+
+The aggregate Lasso result is useful, but it does not show whether Lasso works
+equally well on every dataset. For that reason, this experiment separates the
+Lasso behaviour by dataset and reports both mean test accuracy and the average
+number of active neurons. The same three variants from the previous experiment
+are used here, but the results are no longer averaged across datasets. This is
+important because a sparse output layer can be very useful on one dataset and
+too aggressive on another.
+
+\begin{table}[H]
+\centering
+\caption{Dataset-level Lasso behaviour. Each cell reports mean test accuracy and mean number of active hidden neurons over ten seeds.}
+\label{tab:exp_lasso_by_dataset}
+\begin{tabular}{@{}lrrr@{}}
+\toprule
+Dataset & Full Ridge+GCV & ES-CFS Lasso & Lasso-screened Ridge+GCV \\
+\midrule
+Breast-W & $0.9600$ / $50.00$ & $0.9679$ / $6.70$ & $\textbf{0.9693}$ / $\textbf{5.40}$ \\
+Ionosphere & $\textbf{0.9380}$ / $50.00$ & $0.9211$ / $31.50$ & $0.9282$ / $27.10$ \\
+Sonar & $0.8095$ / $50.00$ & $\textbf{0.8119}$ / $28.20$ & $0.8095$ / $\textbf{23.20}$ \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\begin{figure}[H]
+\centering
+\includegraphics[width=0.90\textwidth]{runs/lasso_filter/lasso_dataset_sparsity.png}
+\caption{Dataset-level active hidden neurons after Lasso filtering.}
+\label{fig:exp_lasso_dataset_behaviour}
+\end{figure}
+
+The behaviour is not identical across datasets. On Breast-W, Lasso-screened
+Ridge improves mean test accuracy while reducing the active hidden layer from
+50 neurons to only 5.40. On Sonar, direct Lasso slightly improves mean test
+accuracy and removes almost half of the hidden units. On Ionosphere, however,
+full Ridge remains better in test accuracy. This means that Lasso should be
+explained as an adaptive sparsification method, not as a universally better
+output layer.
+
+\subsection{Experiment 10: Multiclass Softmax Benchmark}
+\label{subsec:exp_softmax}
+
+The tenth experiment studies the probabilistic version of the architecture.
+Ridge classification produces scores, but not probabilities. The softmax
+architecture solves this for multiclass classification by producing one logit
+per class and converting the logits into class probabilities.
+
+Linear Softmax CE is a multinomial logistic-regression model trained with
+cross-entropy directly on the original features. Random tanh Softmax CE uses a
+random nonlinear hidden layer before the softmax output, while ES-CFS Softmax CE
+uses the evolved hidden representation from the prototype and then trains the
+softmax layer with cross-entropy. HistGradientBoosting and Gradient MLP are
+included again as strong tabular and neural baselines. Besides accuracy and
+macro-F1, the experiment reports cross-entropy and ECE. Cross-entropy evaluates
+the quality of the predicted probabilities, and ECE measures calibration, that
+is, whether predicted confidence matches empirical correctness.
+
+\begin{table}[H]
+\centering
+\caption{Multiclass softmax benchmark. Higher accuracy and macro-F1 are better; lower CE and ECE are better.}
+\label{tab:exp_softmax_results}
+\begin{tabular}{@{}llrrrr@{}}
+\toprule
+Dataset & Model & Test Acc & Macro-F1 & Test CE & Test ECE \\
+\midrule
+Digits & Linear Softmax CE & $0.9611$ & $0.9606$ & $0.3430$ & $0.0327$ \\
+Digits & Random tanh Softmax CE & $0.9556$ & $0.9548$ & $0.7151$ & $0.0403$ \\
+Digits & ES-CFS Softmax CE & $0.9611$ & $0.9603$ & $0.4560$ & $0.0340$ \\
+Digits & HistGradientBoosting & $0.9556$ & $0.9548$ & $\textbf{0.1398}$ & $0.0258$ \\
+Digits & Gradient MLP & $\textbf{0.9694}$ & $\textbf{0.9692}$ & $0.1572$ & $\textbf{0.0084}$ \\
+\midrule
+GaussianQuantiles-3000 & Linear Softmax CE & $0.3300$ & $0.3292$ & $1.0993$ & $0.0136$ \\
+GaussianQuantiles-3000 & Random tanh Softmax CE & $0.9950$ & $0.9950$ & $0.0201$ & $0.0045$ \\
+GaussianQuantiles-3000 & ES-CFS Softmax CE & $\textbf{0.9983}$ & $\textbf{0.9983}$ & $\textbf{0.0083}$ & $\textbf{0.0030}$ \\
+GaussianQuantiles-3000 & HistGradientBoosting & $0.9767$ & $0.9766$ & $0.0923$ & $0.0205$ \\
+GaussianQuantiles-3000 & Gradient MLP & $0.9783$ & $0.9784$ & $0.1086$ & $0.0679$ \\
+\midrule
+Spiral3-3000 & Linear Softmax CE & $0.3333$ & $0.3334$ & $1.0560$ & $0.1761$ \\
+Spiral3-3000 & Random tanh Softmax CE & $0.8550$ & $0.8553$ & $0.4803$ & $0.0464$ \\
+Spiral3-3000 & ES-CFS Softmax CE & $0.9850$ & $0.9850$ & $0.0464$ & $\textbf{0.0089}$ \\
+Spiral3-3000 & HistGradientBoosting & $\textbf{0.9900}$ & $\textbf{0.9900}$ & $\textbf{0.0451}$ & $\textbf{0.0089}$ \\
+Spiral3-3000 & Gradient MLP & $0.9883$ & $0.9883$ & $0.0775$ & $0.0424$ \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\begin{figure}[H]
+\centering
+\includegraphics[width=0.95\textwidth]{runs/logistic_multiclass/softmax_model_comparison.png}
+\caption{Multiclass softmax model comparison by test accuracy.}
+\label{fig:exp_softmax_model_comparison}
+\end{figure}
+
+\begin{figure}[H]
+\centering
+\includegraphics[width=0.95\textwidth]{runs/logistic_multiclass/softmax_representation_value.png}
+\caption{Softmax ablation: linear softmax, random tanh features, and evolved ES-CFS hidden features.}
+\label{fig:exp_softmax_representation}
+\end{figure}
+
+\begin{figure}[H]
+\centering
+\includegraphics[width=0.95\textwidth]{runs/logistic_multiclass/softmax_probability_metrics.png}
+\caption{Probability-quality metrics for the multiclass softmax benchmark.}
+\label{fig:exp_softmax_probability}
+\end{figure}
+
+The softmax architecture validates the probabilistic extension of the
+prototype. On Digits, ES-CFS Softmax CE reaches $0.9611$ test accuracy, matching
+linear softmax but staying below the gradient MLP. The nonlinear synthetic
+datasets show the value of the evolved representation more clearly. Linear
+softmax fails on GaussianQuantiles and Spiral3, while ES-CFS Softmax CE reaches
+$0.9983$ and $0.9850$ test accuracy respectively. The probability plots are
+also useful because they show metrics, such as cross-entropy and calibration
+error, that cannot be naturally obtained from Ridge scores.
+
+\subsection{Experiment 11: Michigan vs. Pittsburgh Representation}
+\label{subsec:exp_michigan_pittsburgh}
+
+The last experiment is the most directly connected to the original motivation
+of the project. The initial question was whether a neural architecture based on
+the Michigan idea could be useful in a one-hidden-layer neural network. In a
+Michigan representation, each individual is only one hidden neuron. The final
+hidden layer is therefore not encoded by a single chromosome, but by the
+surviving population of neurons. In a Pittsburgh representation, each
+individual encodes a complete solution. In this case, one individual is a full
+hidden layer with all its neurons.
+
+The comparison was redesigned from scratch to make the difference between both
+approaches as isolated as possible. Both architectures use the same datasets,
+the same train/validation/test split, the same preprocessing, the same number
+of hidden neurons in the final model, the same tanh activation function, and
+the same analytic Ridge+GCV output layer. The final checkpoint is also selected
+in the same way: the model with the best validation accuracy is kept, using
+validation MSE as a tie-breaker. This means that the comparison is not between
+different output solvers or different data pipelines, but between two ways of
+representing and searching the hidden layer.
+
+Three variants are compared. Michigan ES-CFS is the proposed prototype. It
+keeps a population of 50 neurons, creates 250 new candidate neurons per
+generation, selects the next hidden layer with the CFS credit-assignment
+criterion, and solves the Ridge+GCV output once per generation. Pittsburgh ES
+matched budget is the fairest Pittsburgh comparison in terms of newly generated
+hidden units. It has 5 parent networks and creates 5 offspring networks per
+generation. Since each network contains 50 hidden neurons, this also creates
+250 new hidden neurons per generation. However, because Pittsburgh evaluates
+whole networks, it must solve Ridge+GCV for 10 complete hidden layers every
+generation. Pittsburgh ES larger population gives the Pittsburgh representation
+a stronger search budget: it uses 12 parents and 12 offspring networks, so it
+creates 600 new hidden neurons and solves Ridge+GCV 24 times per generation.
+This second Pittsburgh variant is included to check whether a larger
+whole-network population can recover the performance lost under the matched
+budget setting.
+
+The experiment was run on Breast-W, Ionosphere, and Sonar with five seeds
+($42$--$46$), 50 generations, and 50 hidden neurons in the final architecture.
+The reproducible implementation is in \texttt{benchmark\_level1.py}, and the
+generated plots and JSON summary are stored in
+\texttt{runs/michigan\_pittsburgh/}.
+
+The results in Table~\ref{tab:exp_michigan_pittsburgh_overall} use mean
+$\pm$ standard error over the 15 dataset/seed runs.
+
+\begin{table}[H]
+\centering
+\caption{Michigan--Pittsburgh comparison over Breast-W, Ionosphere, and Sonar.}
+\label{tab:exp_michigan_pittsburgh_overall}
+\resizebox{\textwidth}{!}{%
+\begin{tabular}{@{}lrrrrrrr@{}}
+\toprule
+Architecture & Val Acc & Test Acc & Val--Test Gap & Test AUC & Fit s & New neurons/gen & Ridge solves/gen \\
+\midrule
+Michigan ES-CFS & $0.9262\pm0.0160$ & $\textbf{0.9019}\pm0.0184$ & $\textbf{0.0243}\pm0.0092$ & $\textbf{0.9481}\pm0.0110$ & $\textbf{0.3799}\pm0.0402$ & $250$ & $\textbf{1.0}$ \\
+Pittsburgh ES matched budget & $0.9456\pm0.0090$ & $0.8657\pm0.0245$ & $0.0798\pm0.0191$ & $0.9279\pm0.0184$ & $1.0519\pm0.0176$ & $250$ & $10.0$ \\
+Pittsburgh ES larger population & $\textbf{0.9666}\pm0.0069$ & $0.8756\pm0.0201$ & $0.0911\pm0.0181$ & $0.9286\pm0.0144$ & $2.5327\pm0.0482$ & $600$ & $24.0$ \\
+\bottomrule
+\end{tabular}%
+}
+\end{table}
+
+\begin{figure}[H]
+\centering
+\includegraphics[width=0.95\textwidth]{runs/michigan_pittsburgh/michigan_pittsburgh_accuracy.png}
+\caption{Validation and test accuracy for the Michigan and Pittsburgh representations.}
+\label{fig:exp_michigan_pittsburgh_accuracy}
+\end{figure}
+
+The main result is that Pittsburgh achieves higher validation accuracy, but
+Michigan achieves better test accuracy and better ROC-AUC. Michigan ES-CFS
+obtains $0.9019$ mean test accuracy and $0.9481$ mean ROC-AUC. The matched
+Pittsburgh variant obtains $0.8657$ test accuracy and $0.9279$ ROC-AUC, while
+the larger Pittsburgh variant improves slightly to $0.8756$ test accuracy and
+$0.9286$ ROC-AUC. The validation-test gap is very important here. Michigan has
+a small average gap of $0.0243$, while the Pittsburgh variants have gaps of
+$0.0798$ and $0.0911$. This means that the Pittsburgh networks look better on
+validation but transfer less well to the test set. In practical terms, the
+whole-layer representation is more exposed to validation overfitting because
+each individual is a high-dimensional complete model.
+
+\begin{table}[H]
+\centering
+\caption{Per-dataset mean test accuracy in the Michigan--Pittsburgh comparison.}
+\label{tab:exp_michigan_pittsburgh_dataset}
+\resizebox{\textwidth}{!}{%
+\begin{tabular}{@{}lrrr@{}}
+\toprule
+Dataset & Michigan ES-CFS & Pittsburgh ES matched budget & Pittsburgh ES larger population \\
+\midrule
+Breast-W & $0.9600\pm0.0072$ & $0.9614\pm0.0082$ & $\textbf{0.9686}\pm0.0056$ \\
+Ionosphere & $\textbf{0.9268}\pm0.0140$ & $0.8930\pm0.0141$ & $0.8676\pm0.0123$ \\
+Sonar & $\textbf{0.8190}\pm0.0248$ & $0.7429\pm0.0124$ & $0.7905\pm0.0156$ \\
+\bottomrule
+\end{tabular}%
+}
+\end{table}
+
+\begin{figure}[H]
+\centering
+\includegraphics[width=0.95\textwidth]{runs/michigan_pittsburgh/michigan_pittsburgh_dataset_accuracy.png}
+\caption{Per-dataset test accuracy for the Michigan and Pittsburgh representations.}
+\label{fig:exp_michigan_pittsburgh_dataset_accuracy}
+\end{figure}
+
+The per-dataset results make the interpretation clearer. On Breast-W, all
+methods work well and the larger Pittsburgh population obtains the best mean
+test accuracy. This dataset is relatively easy for the tested models, so a
+complete-network search can perform very well. The difference appears on the
+harder datasets. On Ionosphere, Michigan reaches $0.9268$ test accuracy, while
+the matched and larger Pittsburgh variants reach $0.8930$ and $0.8676$. On
+Sonar, which is small and high-dimensional, the gap is even more visible:
+Michigan reaches $0.8190$, while the matched Pittsburgh variant falls to
+$0.7429$ and the larger Pittsburgh variant reaches $0.7905$. This supports the
+idea that searching with neuron-level individuals can be more robust when the
+number of samples is limited and a full hidden layer is a large object to
+optimise at once.
+
+\begin{figure}[H]
+\centering
+\includegraphics[width=0.95\textwidth]{runs/michigan_pittsburgh/michigan_pittsburgh_cost.png}
+\caption{Computational cost of the Michigan and Pittsburgh representations.}
+\label{fig:exp_michigan_pittsburgh_cost}
+\end{figure}
+
+The computational-cost plot shows why this result gives value to the
+prototype. The matched Pittsburgh variant creates the same number of new hidden
+neurons per generation as Michigan: 250. Even so, it is almost three times
+slower on average, because it evaluates 10 complete hidden layers and therefore
+solves Ridge+GCV 10 times per generation. Michigan solves Ridge+GCV only once
+per generation, after selecting the neuron population. The larger Pittsburgh
+variant is around 6.7 times slower than Michigan and solves Ridge+GCV 24 times
+per generation. Therefore, increasing the Pittsburgh search budget improves its
+test accuracy only slightly, but it increases cost substantially.
+
+\begin{figure}[H]
+\centering
+\includegraphics[width=0.88\textwidth]{runs/michigan_pittsburgh/michigan_pittsburgh_accuracy_time.png}
+\caption{Accuracy--time trade-off in the Michigan--Pittsburgh comparison.}
+\label{fig:exp_michigan_pittsburgh_accuracy_time}
+\end{figure}
+
+\begin{figure}[H]
+\centering
+\includegraphics[width=0.95\textwidth]{runs/michigan_pittsburgh/michigan_pittsburgh_convergence.png}
+\caption{Validation accuracy during evolution for Michigan and Pittsburgh.}
+\label{fig:exp_michigan_pittsburgh_convergence}
+\end{figure}
+
+The accuracy-time plot summarises the trade-off. Michigan is placed in the best
+region of the plot: higher test accuracy and lower training time. Pittsburgh
+does improve validation accuracy during evolution, as shown in the convergence
+plot, but this does not translate into better test performance. This is a very
+important conclusion for the thesis. It suggests that the Michigan
+representation is not only a different way to encode a neural network; in this
+prototype, it also changes the computational structure of the training problem.
+Instead of evaluating many full networks, the algorithm searches locally for
+useful hidden neurons and uses Ridge+GCV only after the hidden population has
+been selected.
+
+This experiment does not prove that Michigan representations are always better
+than Pittsburgh representations. The tested datasets are small binary tabular
+datasets, and a different Pittsburgh implementation with more advanced genetic
+operators could behave differently. However, under a controlled setting where
+activation function, hidden width, output solver, validation selection, and data
+splits are shared, the Michigan version obtains a better accuracy-time trade-off
+and a smaller generalisation gap. This directly supports the original
+hypothesis of the project: combining a Michigan-style evolutionary search with
+a one-hidden-layer neural network and an analytic Ridge/GCV output layer can
+give real practical value compared with evolving complete hidden layers.
+
+%\subsection{Overall Experimental Interpretation}
+%\label{subsec:exp_overall_interpretation}
+
+%Taken together, the experiments show that the prototype has a clear value, but also clear limits. The Ridge/GCV architecture is competitive with strong tabular baselines and, more importantly, the ablations show that the evolved hidden representation is doing useful work. The regression experiments show that the same idea can also improve continuous prediction, although it does not beat every specialised regressor. The Lasso experiments add a useful sparsification mechanism, reducing the final hidden layer by more than half while keeping almost the same test accuracy. The softmax benchmark shows that the same hidden representation can be used in a probabilistic multiclass setting, at the cost of losing the closed-form Ridge/GCV output solve. Finally, the Michigan--Pittsburgh benchmark supports the original motivation of the project: neuron-level evolution can obtain a better accuracy-time trade-off than complete-layer evolution under the same Ridge/GCV output architecture. 
