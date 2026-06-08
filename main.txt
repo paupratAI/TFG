@@ -1,0 +1,72 @@
+\documentclass[11pt,a4paper]{article}
+
+\usepackage[utf8]{inputenc}
+\usepackage[T1]{fontenc}
+\usepackage[english]{babel}
+
+\usepackage[
+  top=2cm,
+  bottom=2cm,
+  left=3.25cm,
+  right=3.25cm,
+  headheight=50pt,
+  includehead,
+  includefoot,
+  heightrounded
+]{geometry}
+
+\usepackage{amsmath}
+\usepackage{amssymb}
+\usepackage{booktabs}
+\usepackage{graphicx}
+\usepackage{pdfpages}
+\usepackage{fancyhdr}
+\usepackage{microtype}
+\usepackage[ruled,vlined]{algorithm2e}
+\usepackage[nottoc,numbib]{tocbibind}
+\usepackage[hidelinks]{hyperref}
+
+\SetKwInput{KwInput}{Input}
+\SetKwInput{KwOutput}{Output}
+\DontPrintSemicolon
+
+\setlength{\parindent}{0pt}
+\setlength{\parskip}{0.45em}
+\setcounter{secnumdepth}{4}
+\setcounter{tocdepth}{4}
+
+\begin{document}
+
+\IfFileExists{portada.pdf}{%
+  \includepdf[pages={1}]{portada.pdf}
+  \setcounter{page}{2}
+}{%
+  \begin{titlepage}
+    \centering
+    \vspace*{3cm}
+    {\Large Bachelor's Thesis\par}
+    \vspace{1.5cm}
+    {\huge\bfseries Training neural networks with Evolution Strategies\par}
+    \vfill
+    {\large Pau Prat Moreno\par}
+  \end{titlepage}
+  \setcounter{page}{2}
+}
+
+% --- CONFIGURACIÓN DEL ENCABEZADO ---
+\fancyhf{} % Limpia encabezados y pies de página anteriores
+\rhead{\includegraphics[height=1.2cm]{Logos UPC/Logo UPC BCNTech Negre Transparent.png}}
+\lhead{\small\textbf{Training neural networks with Evolution Strategies}\vspace{5pt}}
+\cfoot{\thepage} % Añade el número de página al centro del pie de página
+\pagestyle{fancy}
+% -------------------------------------------------------------------
+
+\include{abstract}
+
+\clearpage
+\tableofcontents
+
+\clearpage
+\include{informe}
+
+\end{document}
