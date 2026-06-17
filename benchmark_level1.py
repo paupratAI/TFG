@@ -1,21 +1,21 @@
 """
 benchmark_level1.py
 
-Fair Michigan-vs-Pittsburgh benchmark for the Ridge/GCV architecture.
+Fair Michigan-vs-Pittsburgh benchmark for the binary logistic architecture.
 
 The goal of this script is to isolate the representation difference:
 
 * Michigan: each individual is one hidden neuron. The population itself is the
   hidden layer. Credit assignment is handled by CFS neuron selection.
 * Pittsburgh: each individual is a complete hidden layer. A whole candidate
-  network is evaluated with the same Ridge/GCV output layer.
+  network is evaluated with the same logistic output layer.
 
 Both variants use:
 
 * the same train/validation/test split;
 * the same tanh hidden units;
 * the same hidden-layer width;
-* the same analytic Ridge/GCV output solver;
+* the same unregularised logistic output solver;
 * the same validation-based final checkpoint selection.
 
 The script writes all artefacts under runs/michigan_pittsburgh/.
@@ -39,11 +39,18 @@ import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 import numpy as np
-from sklearn.metrics import accuracy_score, mean_squared_error, roc_auc_score
+from sklearn.metrics import accuracy_score, roc_auc_score
 
 from core_es import MichiganESState, compute_activations, mutate_population
 from data import load_dataset_with_validation
-from gcv import compute_ridge_gcv
+from logistic_output import (
+    binary_brier_score,
+    binary_ece,
+    binary_log_loss_from_proba,
+    compute_logistic_output,
+    labels_to_binary,
+    predict_proba as predict_logistic_proba,
+)
 from selection import cfs_selection, r2_fitness
 
 
@@ -118,18 +125,21 @@ def _format_pm(summary: dict[str, float], error: str = "std") -> str:
 
 def _binary_metrics(
     y_pm1: np.ndarray,
-    scores: np.ndarray,
+    proba_pos: np.ndarray,
     pred_pm1: np.ndarray,
 ) -> dict[str, float | None]:
     y = np.asarray(y_pm1, dtype=np.float64).reshape(-1)
-    s = np.asarray(scores, dtype=np.float64).reshape(-1)
+    y01 = labels_to_binary(y).reshape(-1)
+    p_pos = np.asarray(proba_pos, dtype=np.float64).reshape(-1)
     p = np.asarray(pred_pm1, dtype=np.float64).reshape(-1)
     out: dict[str, float | None] = {
         "acc": float(accuracy_score(y, p)),
-        "mse": float(mean_squared_error(y, s)),
+        "ce": binary_log_loss_from_proba(y01, p_pos),
+        "brier": binary_brier_score(y01, p_pos),
+        "ece": binary_ece(y01, p_pos),
     }
-    if len(np.unique(y)) == 2:
-        out["roc_auc"] = float(roc_auc_score((y > 0.0).astype(np.float64), s))
+    if len(np.unique(y01)) == 2:
+        out["roc_auc"] = float(roc_auc_score(y01, p_pos))
     else:
         out["roc_auc"] = None
     return out
@@ -141,22 +151,22 @@ def _fit_and_score_layer(
 ) -> dict[str, Any]:
     Phi_tr = compute_activations(alpha, split.X_tr)
     Phi_tr_bias = np.c_[Phi_tr, np.ones(len(split.y_tr))]
-    best_lambda, beta, gcv = compute_ridge_gcv(Phi_tr_bias, split.y_tr)
+    beta, train_ce, n_iter = compute_logistic_output(Phi_tr_bias, split.y_tr)
 
-    train_scores = Phi_tr_bias @ beta
-    train_pred = np.where(train_scores.reshape(-1) >= 0.0, 1.0, -1.0)
-    train = _binary_metrics(split.y_tr, train_scores, train_pred)
+    train_proba = predict_logistic_proba(Phi_tr_bias, beta)
+    train_pred = np.where(train_proba.reshape(-1) >= 0.5, 1.0, -1.0)
+    train = _binary_metrics(split.y_tr, train_proba, train_pred)
 
     Phi_val = compute_activations(alpha, split.X_val)
     Phi_val_bias = np.c_[Phi_val, np.ones(len(split.y_val))]
-    val_scores = Phi_val_bias @ beta
-    val_pred = np.where(val_scores.reshape(-1) >= 0.0, 1.0, -1.0)
-    validation = _binary_metrics(split.y_val, val_scores, val_pred)
+    val_proba = predict_logistic_proba(Phi_val_bias, beta)
+    val_pred = np.where(val_proba.reshape(-1) >= 0.5, 1.0, -1.0)
+    validation = _binary_metrics(split.y_val, val_proba, val_pred)
 
     return {
         "beta": beta,
-        "lambda": float(best_lambda),
-        "gcv": float(gcv),
+        "train_ce_objective": float(train_ce),
+        "output_n_iter": int(n_iter),
         "train": train,
         "validation": validation,
     }
@@ -175,9 +185,9 @@ def _evaluate_final(
     ):
         Phi = compute_activations(alpha, X)
         Phi_bias = np.c_[Phi, np.ones(len(y))]
-        scores = Phi_bias @ beta
-        pred = np.where(scores.reshape(-1) >= 0.0, 1.0, -1.0)
-        out[name] = _binary_metrics(y, scores, pred)
+        proba = predict_logistic_proba(Phi_bias, beta)
+        pred = np.where(proba.reshape(-1) >= 0.5, 1.0, -1.0)
+        out[name] = _binary_metrics(y, proba, pred)
     return out
 
 
@@ -189,10 +199,10 @@ def _is_better_checkpoint(
         return True
     cand_val = float(candidate["validation"]["acc"])
     best_val = float(best["validation"]["acc"])
-    cand_mse = float(candidate["validation"]["mse"])
-    best_mse = float(best["validation"]["mse"])
+    cand_ce = float(candidate["validation"]["ce"])
+    best_ce = float(best["validation"]["ce"])
     return cand_val > best_val + 1e-12 or (
-        abs(cand_val - best_val) <= 1e-12 and cand_mse < best_mse
+        abs(cand_val - best_val) <= 1e-12 and cand_ce < best_ce
     )
 
 
@@ -212,7 +222,7 @@ def train_michigan_cfs(
 
     history: list[dict[str, float | int]] = []
     best_checkpoint: dict[str, Any] | None = None
-    gcv_history: list[float] = []
+    ce_history: list[float] = []
     select_ms_history: list[float] = []
 
     stagnation_window = 15
@@ -259,15 +269,15 @@ def train_michigan_cfs(
 
         scored = _fit_and_score_layer(state.alpha, split)
         state.beta = np.asarray(scored["beta"], dtype=np.float64)
-        gcv_history.append(float(scored["gcv"]))
+        ce_history.append(float(scored["validation"]["ce"]))
 
         candidate_checkpoint = {
             "epoch": epoch,
             "alpha": state.alpha.copy(),
             "L": state.L.copy(),
             "beta": state.beta.copy(),
-            "lambda": float(scored["lambda"]),
-            "gcv": float(scored["gcv"]),
+            "train_ce_objective": float(scored["train_ce_objective"]),
+            "output_n_iter": int(scored["output_n_iter"]),
             "train": scored["train"],
             "validation": scored["validation"],
         }
@@ -275,10 +285,10 @@ def train_michigan_cfs(
             best_checkpoint = candidate_checkpoint
 
         reset_count = 0
-        if len(gcv_history) >= stagnation_window:
-            recent_improvement = gcv_history[-stagnation_window] - gcv_history[-1]
+        if len(ce_history) >= stagnation_window:
+            recent_improvement = ce_history[-stagnation_window] - ce_history[-1]
             relative_improvement = recent_improvement / (
-                abs(gcv_history[-stagnation_window]) + 1e-12
+                abs(ce_history[-stagnation_window]) + 1e-12
             )
             if relative_improvement < stagnation_threshold:
                 scores_surv = pool_r2[best_idx]
@@ -297,10 +307,12 @@ def train_michigan_cfs(
                 "epoch": epoch,
                 "train_acc": float(scored["train"]["acc"]),
                 "validation_acc": float(scored["validation"]["acc"]),
-                "train_mse": float(scored["train"]["mse"]),
-                "validation_mse": float(scored["validation"]["mse"]),
-                "gcv": float(scored["gcv"]),
-                "lambda": float(scored["lambda"]),
+                "train_ce": float(scored["train"]["ce"]),
+                "validation_ce": float(scored["validation"]["ce"]),
+                "train_brier": float(scored["train"]["brier"]),
+                "validation_brier": float(scored["validation"]["brier"]),
+                "train_ece": float(scored["train"]["ece"]),
+                "validation_ece": float(scored["validation"]["ece"]),
                 "select_ms": float(select_ms_history[-1]),
                 "epoch_ms": float((time.perf_counter() - epoch_t0) * 1e3),
                 "reset_count": reset_count,
@@ -327,20 +339,25 @@ def train_michigan_cfs(
         "validation_acc": final["validation"]["acc"],
         "test_acc": final["test"]["acc"],
         "validation_test_gap": float(final["validation"]["acc"] - final["test"]["acc"]),
-        "train_mse": final["train"]["mse"],
-        "validation_mse": final["validation"]["mse"],
-        "test_mse": final["test"]["mse"],
+        "train_ce": final["train"]["ce"],
+        "validation_ce": final["validation"]["ce"],
+        "test_ce": final["test"]["ce"],
+        "train_brier": final["train"]["brier"],
+        "validation_brier": final["validation"]["brier"],
+        "test_brier": final["test"]["brier"],
+        "train_ece": final["train"]["ece"],
+        "validation_ece": final["validation"]["ece"],
+        "test_ece": final["test"]["ece"],
         "train_roc_auc": final["train"]["roc_auc"],
         "validation_roc_auc": final["validation"]["roc_auc"],
         "test_roc_auc": final["test"]["roc_auc"],
-        "final_gcv": float(best_checkpoint["gcv"]),
-        "final_lambda": float(best_checkpoint["lambda"]),
+        "output_n_iter": int(best_checkpoint["output_n_iter"]),
         "elapsed_seconds": float(elapsed),
         "candidate_hidden_units_per_generation": int(
             config.hidden_units + config.michigan_offspring
         ),
         "new_hidden_units_per_generation": int(config.michigan_offspring),
-        "ridge_solves_per_generation": 1,
+        "output_fits_per_generation": 1,
         "select_ms_mean": float(np.mean(select_ms_history)),
     }
     return {"metrics": metrics, "history": history}
@@ -447,8 +464,8 @@ def train_pittsburgh_es(
                 "alpha": pool_alpha[candidate_idx].copy(),
                 "L": pool_L[candidate_idx].copy(),
                 "beta": np.asarray(scored["beta"], dtype=np.float64).copy(),
-                "lambda": float(scored["lambda"]),
-                "gcv": float(scored["gcv"]),
+                "train_ce_objective": float(scored["train_ce_objective"]),
+                "output_n_iter": int(scored["output_n_iter"]),
                 "train": scored["train"],
                 "validation": scored["validation"],
             }
@@ -459,11 +476,11 @@ def train_pittsburgh_es(
             [float(score["validation"]["acc"]) for score in candidate_scores],
             dtype=np.float64,
         )
-        val_mse = np.array(
-            [float(score["validation"]["mse"]) for score in candidate_scores],
+        val_ce = np.array(
+            [float(score["validation"]["ce"]) for score in candidate_scores],
             dtype=np.float64,
         )
-        selected_idx = np.lexsort((val_mse, -val_acc))[
+        selected_idx = np.lexsort((val_ce, -val_acc))[
             : config.pittsburgh_population
         ]
         alpha_pop = pool_alpha[selected_idx].copy()
@@ -476,10 +493,12 @@ def train_pittsburgh_es(
                 "epoch": epoch,
                 "train_acc": float(best_gen_score["train"]["acc"]),
                 "validation_acc": float(best_gen_score["validation"]["acc"]),
-                "train_mse": float(best_gen_score["train"]["mse"]),
-                "validation_mse": float(best_gen_score["validation"]["mse"]),
-                "gcv": float(best_gen_score["gcv"]),
-                "lambda": float(best_gen_score["lambda"]),
+                "train_ce": float(best_gen_score["train"]["ce"]),
+                "validation_ce": float(best_gen_score["validation"]["ce"]),
+                "train_brier": float(best_gen_score["train"]["brier"]),
+                "validation_brier": float(best_gen_score["validation"]["brier"]),
+                "train_ece": float(best_gen_score["train"]["ece"]),
+                "validation_ece": float(best_gen_score["validation"]["ece"]),
                 "epoch_ms": float((time.perf_counter() - epoch_t0) * 1e3),
                 "evaluated_layers": int(pool_alpha.shape[0]),
             }
@@ -506,14 +525,19 @@ def train_pittsburgh_es(
         "validation_acc": final["validation"]["acc"],
         "test_acc": final["test"]["acc"],
         "validation_test_gap": float(final["validation"]["acc"] - final["test"]["acc"]),
-        "train_mse": final["train"]["mse"],
-        "validation_mse": final["validation"]["mse"],
-        "test_mse": final["test"]["mse"],
+        "train_ce": final["train"]["ce"],
+        "validation_ce": final["validation"]["ce"],
+        "test_ce": final["test"]["ce"],
+        "train_brier": final["train"]["brier"],
+        "validation_brier": final["validation"]["brier"],
+        "test_brier": final["test"]["brier"],
+        "train_ece": final["train"]["ece"],
+        "validation_ece": final["validation"]["ece"],
+        "test_ece": final["test"]["ece"],
         "train_roc_auc": final["train"]["roc_auc"],
         "validation_roc_auc": final["validation"]["roc_auc"],
         "test_roc_auc": final["test"]["roc_auc"],
-        "final_gcv": float(best_checkpoint["gcv"]),
-        "final_lambda": float(best_checkpoint["lambda"]),
+        "output_n_iter": int(best_checkpoint["output_n_iter"]),
         "elapsed_seconds": float(elapsed),
         "pittsburgh_population": int(config.pittsburgh_population),
         "pittsburgh_offspring": int(config.pittsburgh_offspring),
@@ -523,7 +547,7 @@ def train_pittsburgh_es(
         "new_hidden_units_per_generation": int(
             config.pittsburgh_offspring * config.hidden_units
         ),
-        "ridge_solves_per_generation": int(evaluated_layers),
+        "output_fits_per_generation": int(evaluated_layers),
         "select_ms_mean": 0.0,
     }
     return {"metrics": metrics, "history": history}
@@ -649,13 +673,15 @@ def summarise_runs(payload: dict[str, Any]) -> dict[str, Any]:
         "validation_acc",
         "test_acc",
         "validation_test_gap",
-        "test_mse",
+        "test_ce",
+        "test_brier",
+        "test_ece",
         "test_roc_auc",
         "elapsed_seconds",
         "selected_epoch",
         "candidate_hidden_units_per_generation",
         "new_hidden_units_per_generation",
-        "ridge_solves_per_generation",
+        "output_fits_per_generation",
     )
 
     summary: dict[str, Any] = {"overall": {}}
@@ -810,8 +836,8 @@ def save_cost_plot(payload: dict[str, Any], output_dir: Path) -> None:
 
     elapsed = [summary[name]["elapsed_seconds"]["mean"] for name in names]
     elapsed_sem = [summary[name]["elapsed_seconds"]["sem"] for name in names]
-    ridge_solves = [
-        summary[name]["ridge_solves_per_generation"]["mean"] for name in names
+    output_fits = [
+        summary[name]["output_fits_per_generation"]["mean"] for name in names
     ]
     candidate_units = [
         summary[name]["candidate_hidden_units_per_generation"]["mean"]
@@ -832,9 +858,9 @@ def save_cost_plot(payload: dict[str, Any], output_dir: Path) -> None:
     axes[0].set_xticklabels(labels, rotation=15, ha="right")
     axes[0].grid(True, axis="y", alpha=0.25)
 
-    axes[1].bar(x, ridge_solves)
-    axes[1].set_title("Ridge/GCV solves per generation")
-    axes[1].set_ylabel("Solves")
+    axes[1].bar(x, output_fits)
+    axes[1].set_title("Logistic output fits per generation")
+    axes[1].set_ylabel("Output fits")
     axes[1].set_xticks(x)
     axes[1].set_xticklabels(labels, rotation=15, ha="right")
     axes[1].grid(True, axis="y", alpha=0.25)
@@ -942,7 +968,7 @@ def save_latex_notes(payload: dict[str, Any], output_dir: Path) -> None:
     lines.append("\\begin{tabular}{@{}lrrrrrrr@{}}")
     lines.append("\\toprule")
     lines.append(
-        "Architecture & Val Acc & Test Acc & Val--Test Gap & Test AUC & Fit s & New neurons/gen & Ridge solves/gen \\\\"
+        "Architecture & Val Acc & Test Acc & Val--Test Gap & Test AUC & Fit s & New neurons/gen & Output fits/gen \\\\"
     )
     lines.append("\\midrule")
     for name, label in arch_labels:
@@ -955,7 +981,7 @@ def save_latex_notes(payload: dict[str, Any], output_dir: Path) -> None:
             f"${_format_pm(row['test_roc_auc'], 'sem')}$ & "
             f"${_format_pm(row['elapsed_seconds'], 'sem')}$ & "
             f"${row['new_hidden_units_per_generation']['mean']:.0f}$ & "
-            f"${row['ridge_solves_per_generation']['mean']:.1f}$ \\\\"
+            f"${row['output_fits_per_generation']['mean']:.1f}$ \\\\"
         )
     lines.append("\\bottomrule")
     lines.append("\\end{tabular}%")
@@ -1028,7 +1054,7 @@ def print_summary(payload: dict[str, Any]) -> None:
     overall = payload["summary"]["overall"]
     print("\n## Michigan--Pittsburgh Summary")
     print(
-        "| Architecture | Val Acc | Test Acc | Val-Test Gap | Test AUC | Fit s | New neurons/gen | Ridge solves/gen |"
+        "| Architecture | Val Acc | Test Acc | Val-Test Gap | Test AUC | Fit s | New neurons/gen | Output fits/gen |"
     )
     print("|---|---:|---:|---:|---:|---:|---:|---:|")
     for name, label in _arch_labels(payload):
@@ -1041,13 +1067,13 @@ def print_summary(payload: dict[str, Any]) -> None:
             f"{row['test_roc_auc']['mean']:.4f} +/- {row['test_roc_auc']['sem']:.4f} | "
             f"{row['elapsed_seconds']['mean']:.2f} +/- {row['elapsed_seconds']['sem']:.2f} | "
             f"{row['new_hidden_units_per_generation']['mean']:.0f} | "
-            f"{row['ridge_solves_per_generation']['mean']:.1f} |"
+            f"{row['output_fits_per_generation']['mean']:.1f} |"
         )
 
 
 def build_arg_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
-        description="Fair Michigan-vs-Pittsburgh Ridge/GCV benchmark."
+        description="Fair Michigan-vs-Pittsburgh binary logistic benchmark."
     )
     parser.add_argument(
         "--datasets",

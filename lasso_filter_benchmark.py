@@ -1,18 +1,19 @@
 """
-lasso_filter_benchmark.py — Lasso output-layer filtering experiment.
+lasso_filter_benchmark.py — Sparse logistic output-layer filtering experiment.
 
 This experiment keeps the current Michigan ES hidden representation fixed and
 compares three output-layer choices on the same selected neurons:
 
-  1) Full ES-CFS Ridge+GCV: all evolved hidden neurons are kept.
-  2) ES-CFS Lasso: Lasso is used directly as the sparse output layer.
-  3) Lasso-screened Ridge+GCV: Lasso selects active neurons, then Ridge+GCV is
-     refit only on those neurons.
+  1) Full ES-CFS Logistic CE: all evolved hidden neurons are kept.
+  2) ES-CFS L1 Logistic: L1-logistic is used directly as the sparse output layer.
+  3) L1-screened ES-CFS Logistic CE: L1-logistic selects active neurons, then
+     unregularised logistic output is refit only on those neurons.
 
-The goal is to test whether Lasso can act as a second filtering stage after
-the Michigan fitness step. The evolutionary stage already selects mu neurons
-from a parent-plus-offspring pool; Lasso can then remove redundant survivors at
-the output layer.
+The goal is to test whether an L1 penalty can act as a second filtering stage
+after the Michigan fitness step. The evolutionary stage already selects mu
+neurons from a parent-plus-offspring pool; L1-logistic can then remove
+redundant survivors at the output layer while keeping the classification
+objective probabilistic.
 """
 
 from __future__ import annotations
@@ -36,13 +37,20 @@ matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 import numpy as np
 from sklearn.exceptions import ConvergenceWarning
-from sklearn.linear_model import Lasso
-from sklearn.metrics import accuracy_score, mean_squared_error, roc_auc_score
+from sklearn.linear_model import LogisticRegression
+from sklearn.metrics import accuracy_score, roc_auc_score
 from sklearn.preprocessing import StandardScaler
 
 from core_es import compute_activations
 from data import load_dataset_with_validation
-from gcv import compute_ridge_gcv
+from logistic_output import (
+    binary_brier_score,
+    binary_ece,
+    binary_log_loss_from_proba,
+    compute_logistic_output,
+    labels_to_binary,
+    predict_proba as predict_logistic_proba,
+)
 from train import train
 
 
@@ -83,38 +91,45 @@ def _bias_design(Phi: np.ndarray) -> np.ndarray:
     return np.c_[np.asarray(Phi, dtype=np.float64), np.ones(Phi.shape[0])]
 
 
-def _score_metrics(
+def _probability_metrics(
     y_tr: np.ndarray,
     y_val: np.ndarray,
     y_te: np.ndarray,
-    train_scores: np.ndarray,
-    val_scores: np.ndarray,
-    test_scores: np.ndarray,
+    train_proba: np.ndarray,
+    val_proba: np.ndarray,
+    test_proba: np.ndarray,
 ) -> dict[str, float]:
     y_tr_v = np.asarray(y_tr, dtype=np.float64).reshape(-1)
     y_val_v = np.asarray(y_val, dtype=np.float64).reshape(-1)
     y_te_v = np.asarray(y_te, dtype=np.float64).reshape(-1)
-    train_scores = np.asarray(train_scores, dtype=np.float64).reshape(-1)
-    val_scores = np.asarray(val_scores, dtype=np.float64).reshape(-1)
-    test_scores = np.asarray(test_scores, dtype=np.float64).reshape(-1)
-    train_pred = np.where(train_scores >= 0.0, 1.0, -1.0)
-    val_pred = np.where(val_scores >= 0.0, 1.0, -1.0)
-    test_pred = np.where(test_scores >= 0.0, 1.0, -1.0)
+    y_tr01 = labels_to_binary(y_tr_v).reshape(-1)
+    y_val01 = labels_to_binary(y_val_v).reshape(-1)
+    y_te01 = labels_to_binary(y_te_v).reshape(-1)
+    train_proba = np.asarray(train_proba, dtype=np.float64).reshape(-1)
+    val_proba = np.asarray(val_proba, dtype=np.float64).reshape(-1)
+    test_proba = np.asarray(test_proba, dtype=np.float64).reshape(-1)
+    train_pred = np.where(train_proba >= 0.5, 1.0, -1.0)
+    val_pred = np.where(val_proba >= 0.5, 1.0, -1.0)
+    test_pred = np.where(test_proba >= 0.5, 1.0, -1.0)
     return {
         "train_acc": float(accuracy_score(y_tr_v, train_pred)),
         "validation_acc": float(accuracy_score(y_val_v, val_pred)),
         "test_acc": float(accuracy_score(y_te_v, test_pred)),
-        "train_mse": float(mean_squared_error(y_tr_v, train_scores)),
-        "validation_mse": float(mean_squared_error(y_val_v, val_scores)),
-        "test_mse": float(mean_squared_error(y_te_v, test_scores)),
-        "validation_roc_auc": float(
-            roc_auc_score((y_val_v > 0.0).astype(int), val_scores)
-        ),
-        "test_roc_auc": float(roc_auc_score((y_te_v > 0.0).astype(int), test_scores)),
+        "train_ce": binary_log_loss_from_proba(y_tr01, train_proba),
+        "validation_ce": binary_log_loss_from_proba(y_val01, val_proba),
+        "test_ce": binary_log_loss_from_proba(y_te01, test_proba),
+        "train_brier": binary_brier_score(y_tr01, train_proba),
+        "validation_brier": binary_brier_score(y_val01, val_proba),
+        "test_brier": binary_brier_score(y_te01, test_proba),
+        "train_ece": binary_ece(y_tr01, train_proba),
+        "validation_ece": binary_ece(y_val01, val_proba),
+        "test_ece": binary_ece(y_te01, test_proba),
+        "validation_roc_auc": float(roc_auc_score(y_val01, val_proba)),
+        "test_roc_auc": float(roc_auc_score(y_te01, test_proba)),
     }
 
 
-def _fit_full_ridge(
+def _fit_full_logistic(
     Phi_tr: np.ndarray,
     Phi_val: np.ndarray,
     Phi_te: np.ndarray,
@@ -123,27 +138,27 @@ def _fit_full_ridge(
     y_te: np.ndarray,
 ) -> dict[str, object]:
     t0 = time.perf_counter()
-    lam, beta, gcv = compute_ridge_gcv(_bias_design(Phi_tr), y_tr)
+    beta, train_ce, n_iter = compute_logistic_output(_bias_design(Phi_tr), y_tr)
     fit_seconds = time.perf_counter() - t0
     row: dict[str, object] = {
-        "model": "Full ES-CFS Ridge+GCV",
-        "family": "ridge",
-        "alpha": None,
-        "lambda": float(lam),
-        "gcv": float(gcv),
+        "model": "Full ES-CFS Logistic CE",
+        "family": "logistic",
+        "C": None,
+        "train_ce_objective": float(train_ce),
+        "output_n_iter": int(n_iter),
         "active_neurons": int(Phi_tr.shape[1]),
         "active_fraction": 1.0,
         "fit_seconds": float(fit_seconds),
-        "selected_by": "gcv",
+        "selected_by": "cross_entropy",
     }
     row.update(
-        _score_metrics(
+        _probability_metrics(
             y_tr,
             y_val,
             y_te,
-            _bias_design(Phi_tr) @ beta,
-            _bias_design(Phi_val) @ beta,
-            _bias_design(Phi_te) @ beta,
+            predict_logistic_proba(_bias_design(Phi_tr), beta),
+            predict_logistic_proba(_bias_design(Phi_val), beta),
+            predict_logistic_proba(_bias_design(Phi_te), beta),
         )
     )
     return row
@@ -156,7 +171,7 @@ def _choose_sparse_candidate(
     sparsity_penalty: float,
 ) -> dict[str, object]:
     if not candidates:
-        raise RuntimeError("No Lasso candidates were evaluated.")
+        raise RuntimeError("No L1-logistic candidates were evaluated.")
     if selection_rule == "sparsity_penalty":
         selected = max(
             candidates,
@@ -165,7 +180,7 @@ def _choose_sparse_candidate(
                 - sparsity_penalty * float(row["active_fraction"]),
                 float(row["validation_acc"]),
                 -int(row["active_neurons"]),
-                -float(row["validation_mse"]),
+                -float(row["validation_ce"]),
             ),
         )
         selected = dict(selected)
@@ -190,7 +205,7 @@ def _choose_sparse_candidate(
             key=lambda row: (
                 int(row["active_neurons"]),
                 -float(row["validation_acc"]),
-                float(row["validation_mse"]),
+                float(row["validation_ce"]),
             ),
         )[0]
     )
@@ -201,14 +216,14 @@ def _choose_sparse_candidate(
     return selected
 
 
-def _fit_lasso_path(
+def _fit_l1_logistic_path(
     Phi_tr: np.ndarray,
     Phi_val: np.ndarray,
     Phi_te: np.ndarray,
     y_tr: np.ndarray,
     y_val: np.ndarray,
     y_te: np.ndarray,
-    alpha_grid: np.ndarray,
+    c_grid: np.ndarray,
     active_threshold: float,
     max_iter: int,
     tol: float,
@@ -217,40 +232,39 @@ def _fit_lasso_path(
     sparsity_penalty: float,
 ) -> tuple[dict[str, object], list[dict[str, object]], dict[float, np.ndarray]]:
     candidates: list[dict[str, object]] = []
-    active_by_alpha: dict[float, np.ndarray] = {}
-    y_tr_v = np.asarray(y_tr, dtype=np.float64).reshape(-1)
-    for alpha in alpha_grid:
+    active_by_c: dict[float, np.ndarray] = {}
+    y_tr01 = labels_to_binary(y_tr).reshape(-1).astype(int)
+    for c_value in c_grid:
         t0 = time.perf_counter()
-        model = Lasso(
-            alpha=float(alpha),
+        model = LogisticRegression(
+            penalty="l1",
+            C=float(c_value),
+            solver="liblinear",
             fit_intercept=True,
             max_iter=max_iter,
             tol=tol,
-            selection="cyclic",
             random_state=0,
         )
         with warnings.catch_warnings():
             warnings.simplefilter("ignore", ConvergenceWarning)
-            model.fit(Phi_tr, y_tr_v)
+            model.fit(Phi_tr, y_tr01)
         fit_seconds = time.perf_counter() - t0
         coef = np.asarray(model.coef_, dtype=np.float64).reshape(-1)
         active = np.flatnonzero(np.abs(coef) > active_threshold)
-        active_by_alpha[float(alpha)] = active
-        train_scores = model.predict(Phi_tr)
-        val_scores = model.predict(Phi_val)
-        test_scores = model.predict(Phi_te)
+        active_by_c[float(c_value)] = active
+        train_proba = model.predict_proba(Phi_tr)[:, 1]
+        val_proba = model.predict_proba(Phi_val)[:, 1]
+        test_proba = model.predict_proba(Phi_te)[:, 1]
         row: dict[str, object] = {
-            "model": "ES-CFS Lasso",
-            "family": "lasso",
-            "alpha": float(alpha),
-            "lambda": None,
-            "gcv": None,
+            "model": "ES-CFS L1 Logistic",
+            "family": "l1_logistic",
+            "C": float(c_value),
             "active_neurons": int(active.size),
             "active_fraction": float(active.size / max(1, Phi_tr.shape[1])),
             "fit_seconds": float(fit_seconds),
             "selected_by": f"validation_acc_with_{validation_tolerance:g}_tolerance_then_sparsity",
         }
-        row.update(_score_metrics(y_tr, y_val, y_te, train_scores, val_scores, test_scores))
+        row.update(_probability_metrics(y_tr, y_val, y_te, train_proba, val_proba, test_proba))
         candidates.append(row)
     selected = _choose_sparse_candidate(
         candidates,
@@ -258,50 +272,50 @@ def _fit_lasso_path(
         selection_rule=selection_rule,
         sparsity_penalty=sparsity_penalty,
     )
-    return selected, candidates, active_by_alpha
+    return selected, candidates, active_by_c
 
 
-def _fit_screened_ridge_path(
+def _fit_screened_logistic_path(
     Phi_tr: np.ndarray,
     Phi_val: np.ndarray,
     Phi_te: np.ndarray,
     y_tr: np.ndarray,
     y_val: np.ndarray,
     y_te: np.ndarray,
-    lasso_candidates: list[dict[str, object]],
-    active_by_alpha: dict[float, np.ndarray],
+    l1_candidates: list[dict[str, object]],
+    active_by_c: dict[float, np.ndarray],
     validation_tolerance: float,
     selection_rule: str,
     sparsity_penalty: float,
 ) -> tuple[dict[str, object], list[dict[str, object]]]:
     candidates: list[dict[str, object]] = []
-    for lasso_row in lasso_candidates:
-        alpha = float(lasso_row["alpha"])
-        active = active_by_alpha[alpha]
+    for l1_row in l1_candidates:
+        c_value = float(l1_row["C"])
+        active = active_by_c[c_value]
         if active.size == 0:
             continue
         t0 = time.perf_counter()
-        lam, beta, gcv = compute_ridge_gcv(_bias_design(Phi_tr[:, active]), y_tr)
+        beta, train_ce, n_iter = compute_logistic_output(_bias_design(Phi_tr[:, active]), y_tr)
         fit_seconds = time.perf_counter() - t0
         row: dict[str, object] = {
-            "model": "Lasso-screened ES-CFS Ridge+GCV",
-            "family": "lasso_screened_ridge",
-            "alpha": alpha,
-            "lambda": float(lam),
-            "gcv": float(gcv),
+            "model": "L1-screened ES-CFS Logistic CE",
+            "family": "l1_screened_logistic",
+            "C": c_value,
+            "train_ce_objective": float(train_ce),
+            "output_n_iter": int(n_iter),
             "active_neurons": int(active.size),
             "active_fraction": float(active.size / max(1, Phi_tr.shape[1])),
-            "fit_seconds": float(fit_seconds + float(lasso_row["fit_seconds"])),
+            "fit_seconds": float(fit_seconds + float(l1_row["fit_seconds"])),
             "selected_by": f"validation_acc_with_{validation_tolerance:g}_tolerance_then_sparsity",
         }
         row.update(
-            _score_metrics(
+            _probability_metrics(
                 y_tr,
                 y_val,
                 y_te,
-                _bias_design(Phi_tr[:, active]) @ beta,
-                _bias_design(Phi_val[:, active]) @ beta,
-                _bias_design(Phi_te[:, active]) @ beta,
+                predict_logistic_proba(_bias_design(Phi_tr[:, active]), beta),
+                predict_logistic_proba(_bias_design(Phi_val[:, active]), beta),
+                predict_logistic_proba(_bias_design(Phi_te[:, active]), beta),
             )
         )
         candidates.append(row)
@@ -358,6 +372,7 @@ def run_one(dataset_key: str, seed: int, args: argparse.Namespace) -> dict[str, 
             data_home=args.data_home,
             verbose=999,
             seed=seed,
+            output_layer="logistic",
             save_dir=None,
         )
     es_seconds = time.perf_counter() - es_t0
@@ -368,39 +383,39 @@ def run_one(dataset_key: str, seed: int, args: argparse.Namespace) -> dict[str, 
         X_val,
         X_te,
     )
-    alpha_grid = np.asarray(args.alpha_grid, dtype=np.float64)
-    ridge_row = _fit_full_ridge(Phi_tr, Phi_val, Phi_te, y_tr, y_val, y_te)
-    lasso_row, lasso_candidates, active_by_alpha = _fit_lasso_path(
+    c_grid = np.asarray(args.c_grid, dtype=np.float64)
+    full_row = _fit_full_logistic(Phi_tr, Phi_val, Phi_te, y_tr, y_val, y_te)
+    l1_row, l1_candidates, active_by_c = _fit_l1_logistic_path(
         Phi_tr,
         Phi_val,
         Phi_te,
         y_tr,
         y_val,
         y_te,
-        alpha_grid=alpha_grid,
+        c_grid=c_grid,
         active_threshold=args.active_threshold,
-        max_iter=args.lasso_max_iter,
-        tol=args.lasso_tol,
+        max_iter=args.logistic_max_iter,
+        tol=args.logistic_tol,
         validation_tolerance=args.validation_tolerance,
         selection_rule=args.selection_rule,
         sparsity_penalty=args.sparsity_penalty,
     )
-    screened_row, screened_candidates = _fit_screened_ridge_path(
+    screened_row, screened_candidates = _fit_screened_logistic_path(
         Phi_tr,
         Phi_val,
         Phi_te,
         y_tr,
         y_val,
         y_te,
-        lasso_candidates=lasso_candidates,
-        active_by_alpha=active_by_alpha,
+        l1_candidates=l1_candidates,
+        active_by_c=active_by_c,
         validation_tolerance=args.validation_tolerance,
         selection_rule=args.selection_rule,
         sparsity_penalty=args.sparsity_penalty,
     )
 
     rows = []
-    for row in (ridge_row, lasso_row, screened_row):
+    for row in (full_row, l1_row, screened_row):
         enriched = {
             **row,
             "dataset": dataset["label"],
@@ -415,9 +430,9 @@ def run_one(dataset_key: str, seed: int, args: argparse.Namespace) -> dict[str, 
         "dataset": dataset["label"],
         "seed": int(seed),
         "rows": rows,
-        "lasso_candidates": [
+        "l1_candidates": [
             {**row, "dataset": dataset["label"], "seed": int(seed)}
-            for row in lasso_candidates
+            for row in l1_candidates
         ],
         "screened_candidates": [
             {**row, "dataset": dataset["label"], "seed": int(seed)}
@@ -433,7 +448,9 @@ def summarise(rows: list[dict[str, object]]) -> dict[str, object]:
         "validation_acc",
         "test_acc",
         "test_roc_auc",
-        "test_mse",
+        "test_ce",
+        "test_brier",
+        "test_ece",
         "active_neurons",
         "active_fraction",
         "fit_seconds",
@@ -473,11 +490,11 @@ def summarise(rows: list[dict[str, object]]) -> dict[str, object]:
 def save_accuracy_sparsity_plot(summary: dict[str, object], output_path: Path) -> None:
     output_path.parent.mkdir(parents=True, exist_ok=True)
     models = [
-        "Full ES-CFS Ridge+GCV",
-        "ES-CFS Lasso",
-        "Lasso-screened ES-CFS Ridge+GCV",
+        "Full ES-CFS Logistic CE",
+        "ES-CFS L1 Logistic",
+        "L1-screened ES-CFS Logistic CE",
     ]
-    labels = ["Full Ridge", "Lasso", "Lasso-screened Ridge"]
+    labels = ["Full Logistic", "L1 Logistic", "L1-screened Logistic"]
     overall = summary["overall"]
     x = np.arange(len(models))
     val_means = [overall[model]["validation_acc"]["mean"] for model in models]
@@ -512,7 +529,7 @@ def save_accuracy_sparsity_plot(summary: dict[str, object], output_path: Path) -
     axes[2].set_xticks(x)
     axes[2].set_xticklabels(labels, rotation=15, ha="right")
     axes[2].grid(True, axis="y", alpha=0.25)
-    fig.suptitle("Lasso as a second filter after Michigan ES selection")
+    fig.suptitle("L1-logistic as a second filter after Michigan ES selection")
     fig.savefig(output_path, dpi=180)
     plt.close(fig)
 
@@ -521,11 +538,11 @@ def save_dataset_sparsity_plot(summary: dict[str, object], output_path: Path) ->
     output_path.parent.mkdir(parents=True, exist_ok=True)
     datasets = list(summary["by_dataset"].keys())
     models = [
-        "Full ES-CFS Ridge+GCV",
-        "ES-CFS Lasso",
-        "Lasso-screened ES-CFS Ridge+GCV",
+        "Full ES-CFS Logistic CE",
+        "ES-CFS L1 Logistic",
+        "L1-screened ES-CFS Logistic CE",
     ]
-    labels = ["Full Ridge", "Lasso", "Screened Ridge"]
+    labels = ["Full Logistic", "L1 Logistic", "Screened Logistic"]
     x = np.arange(len(datasets))
     width = 0.25
     fig, ax = plt.subplots(figsize=(11.0, 5.0), constrained_layout=True)
@@ -548,11 +565,11 @@ def save_dataset_sparsity_plot(summary: dict[str, object], output_path: Path) ->
 def write_latex_notes(summary: dict[str, object], output_path: Path) -> None:
     overall = summary["overall"]
     lines = [
-        "% Auto-generated notes for the Lasso filtering experiment.",
+        "% Auto-generated notes for the L1-logistic filtering experiment.",
         "\\begin{figure}[H]",
         "\\centering",
         "\\includegraphics[width=0.95\\textwidth]{runs/lasso_filter/lasso_accuracy_sparsity.png}",
-        "\\caption{Lasso output filtering after Michigan ES selection. The panels compare validation accuracy, test accuracy, and the number of active hidden neurons.}",
+        "\\caption{L1-logistic output filtering after Michigan ES selection. The panels compare validation accuracy, test accuracy, and the number of active hidden neurons.}",
         "\\label{fig:lasso_accuracy_sparsity}",
         "\\end{figure}",
         "",
@@ -569,7 +586,7 @@ def write_latex_notes(summary: dict[str, object], output_path: Path) -> None:
 
 
 def parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="Run the Lasso filtering benchmark.")
+    parser = argparse.ArgumentParser(description="Run the L1-logistic filtering benchmark.")
     parser.add_argument("--datasets", nargs="+", choices=sorted(DATASETS), default=["ionosphere", "sonar", "breast-w"])
     parser.add_argument("--seeds", nargs="+", type=int, default=[42, 43, 44])
     parser.add_argument("--data-version", type=int, default=1)
@@ -579,17 +596,17 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--es-epochs", type=int, default=60)
     parser.add_argument("--es-mu", type=int, default=50)
     parser.add_argument("--es-offspring", type=int, default=350)
-    parser.add_argument("--alpha-grid", nargs="+", type=float, default=None)
-    parser.add_argument("--alpha-min-exp", type=float, default=-5.0)
-    parser.add_argument("--alpha-max-exp", type=float, default=-0.3)
-    parser.add_argument("--alpha-points", type=int, default=42)
+    parser.add_argument("--c-grid", nargs="+", type=float, default=None)
+    parser.add_argument("--c-min-exp", type=float, default=-2.0)
+    parser.add_argument("--c-max-exp", type=float, default=3.0)
+    parser.add_argument("--c-points", type=int, default=36)
     parser.add_argument("--validation-tolerance", type=float, default=0.01)
     parser.add_argument(
         "--selection-rule",
         choices=["sparsity_penalty", "tolerance"],
         default="sparsity_penalty",
         help=(
-            "How to choose the final Lasso alpha on validation data. "
+            "How to choose the final L1-logistic C value on validation data. "
             "'sparsity_penalty' maximises validation_acc - sparsity_penalty * active_fraction; "
             "'tolerance' chooses the sparsest candidate within validation_tolerance of the best validation accuracy."
         ),
@@ -601,15 +618,15 @@ def parse_args() -> argparse.Namespace:
         help="Penalty applied to active_fraction when selection_rule='sparsity_penalty'.",
     )
     parser.add_argument("--active-threshold", type=float, default=1e-8)
-    parser.add_argument("--lasso-max-iter", type=int, default=30000)
-    parser.add_argument("--lasso-tol", type=float, default=1e-5)
+    parser.add_argument("--logistic-max-iter", type=int, default=5000)
+    parser.add_argument("--logistic-tol", type=float, default=1e-5)
     parser.add_argument("--output-dir", default="runs/lasso_filter")
     args = parser.parse_args()
-    if args.alpha_grid is None:
-        args.alpha_grid = np.logspace(
-            args.alpha_min_exp,
-            args.alpha_max_exp,
-            args.alpha_points,
+    if args.c_grid is None:
+        args.c_grid = np.logspace(
+            args.c_min_exp,
+            args.c_max_exp,
+            args.c_points,
         ).tolist()
     return args
 
@@ -621,14 +638,14 @@ def main() -> None:
 
     runs: list[dict[str, object]] = []
     rows: list[dict[str, object]] = []
-    lasso_candidates: list[dict[str, object]] = []
+    l1_candidates: list[dict[str, object]] = []
     screened_candidates: list[dict[str, object]] = []
     for dataset in args.datasets:
         for seed in args.seeds:
             result = run_one(dataset, seed, args)
             runs.append(result)
             rows.extend(result["rows"])
-            lasso_candidates.extend(result["lasso_candidates"])
+            l1_candidates.extend(result["l1_candidates"])
             screened_candidates.extend(result["screened_candidates"])
 
     summary = summarise(rows)
@@ -636,7 +653,7 @@ def main() -> None:
         "config": vars(args),
         "rows": rows,
         "runs": runs,
-        "lasso_candidates": lasso_candidates,
+        "l1_candidates": l1_candidates,
         "screened_candidates": screened_candidates,
         "summary": summary,
     }
@@ -654,6 +671,7 @@ def main() -> None:
             f"{model}: "
             f"test_acc={stats['test_acc']['mean']:.4f}+/-{stats['test_acc']['std']:.4f}, "
             f"test_auc={stats['test_roc_auc']['mean']:.4f}+/-{stats['test_roc_auc']['std']:.4f}, "
+            f"test_ce={stats['test_ce']['mean']:.4f}+/-{stats['test_ce']['std']:.4f}, "
             f"active={stats['active_neurons']['mean']:.2f}+/-{stats['active_neurons']['std']:.2f}"
         )
     print(f"\nSaved results to {output_dir}")

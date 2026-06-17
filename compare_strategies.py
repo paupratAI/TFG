@@ -4,7 +4,7 @@ compare_strategies.py — Compare the four ES neuron-selection strategies.
 Runs omp, r2, cfs, and cfs_auc on the same dataset split, saves:
   - a PNG with train-accuracy curves and final validation/test accuracy bars
   - a PNG with validation-accuracy curves
-  - a PNG with diagnostic curves for gap, MSE, GCV/lambda, and timing
+  - a PNG with diagnostic curves for gap, cross-entropy, calibration, and timing
   - a JSON file with final metrics and per-epoch histories
   - when several seeds/datasets are requested, aggregate JSON/PNG summaries
 """
@@ -178,6 +178,7 @@ def run_comparison(
             data_home=args.data_home,
             verbose=args.verbose,
             seed=seed,
+            output_layer="logistic",
             save_dir=None,
         )
         results[strategy] = {
@@ -233,6 +234,15 @@ def summarise_runs(
         "train_mse",
         "validation_mse",
         "test_mse",
+        "train_ce",
+        "validation_ce",
+        "test_ce",
+        "train_brier",
+        "validation_brier",
+        "test_brier",
+        "train_ece",
+        "validation_ece",
+        "test_ece",
         "train_roc_auc",
         "validation_roc_auc",
         "test_roc_auc",
@@ -372,7 +382,7 @@ def save_diagnostics_plot(results: dict[str, object], output_path: Path) -> None
         figsize=(13.5, 9.0),
         constrained_layout=True,
     )
-    ax_gap, ax_mse, ax_gcv, ax_time = axes.ravel()
+    ax_gap, ax_ce, ax_ece, ax_time = axes.ravel()
 
     for strategy, payload in results.items():
         epochs = _epochs(payload)
@@ -382,20 +392,20 @@ def save_diagnostics_plot(results: dict[str, object], output_path: Path) -> None
             gap = [tr - va for tr, va in zip(train_acc, val_acc)]
             ax_gap.plot(epochs, gap, linewidth=2.0, label=strategy)
 
-        train_mse = np.asarray(_history_series(payload, "train_mse"), dtype=np.float64)
-        if train_mse.size:
-            ax_mse.plot(
+        train_ce = np.asarray(_history_series(payload, "train_ce"), dtype=np.float64)
+        if train_ce.size:
+            ax_ce.plot(
                 epochs,
-                np.maximum(train_mse, 1e-12),
+                np.maximum(train_ce, 1e-12),
                 linewidth=2.0,
                 label=strategy,
             )
 
-        gcv = np.asarray(_history_series(payload, "gcv"), dtype=np.float64)
-        if gcv.size:
-            ax_gcv.plot(
+        val_ece = np.asarray(_history_series(payload, "validation_ece"), dtype=np.float64)
+        if val_ece.size:
+            ax_ece.plot(
                 epochs,
-                np.maximum(gcv, 1e-12),
+                np.maximum(val_ece, 1e-12),
                 linewidth=2.0,
                 label=strategy,
             )
@@ -414,19 +424,18 @@ def save_diagnostics_plot(results: dict[str, object], output_path: Path) -> None
     ax_gap.grid(True, alpha=0.25)
     ax_gap.legend()
 
-    ax_mse.set_yscale("log")
-    ax_mse.set_title("Train MSE by generation")
-    ax_mse.set_xlabel("Generation")
-    ax_mse.set_ylabel("MSE")
-    ax_mse.grid(True, alpha=0.25)
-    ax_mse.legend()
+    ax_ce.set_yscale("log")
+    ax_ce.set_title("Train cross-entropy by generation")
+    ax_ce.set_xlabel("Generation")
+    ax_ce.set_ylabel("Cross-entropy")
+    ax_ce.grid(True, alpha=0.25)
+    ax_ce.legend()
 
-    ax_gcv.set_yscale("log")
-    ax_gcv.set_title("GCV objective by generation")
-    ax_gcv.set_xlabel("Generation")
-    ax_gcv.set_ylabel("GCV")
-    ax_gcv.grid(True, alpha=0.25)
-    ax_gcv.legend()
+    ax_ece.set_title("Validation ECE by generation")
+    ax_ece.set_xlabel("Generation")
+    ax_ece.set_ylabel("Expected calibration error")
+    ax_ece.grid(True, alpha=0.25)
+    ax_ece.legend()
 
     ax_time.set_title("Mean selection cost")
     ax_time.set_xlabel("Strategy")
@@ -506,9 +515,9 @@ def save_aggregate_score_plot(
         constrained_layout=True,
     )
     metric_specs = [
-        ("test_mse", "Test MSE", "Lower is better"),
+        ("test_ce", "Test cross-entropy", "Lower is better"),
         ("test_roc_auc", "Test ROC-AUC", "Higher is better"),
-        ("final_gcv", "Selected GCV", "Lower is better"),
+        ("test_ece", "Test ECE", "Lower is better"),
     ]
 
     x = np.arange(len(strategies))
@@ -524,7 +533,7 @@ def save_aggregate_score_plot(
         if metric_name == "test_roc_auc":
             ax.set_ylim(0.0, 1.02)
 
-    fig.suptitle("Aggregate Ridge score-quality metrics")
+    fig.suptitle("Aggregate logistic probability-quality metrics")
     fig.savefig(output_path, dpi=180)
     plt.close(fig)
 
@@ -538,7 +547,7 @@ def save_json(results: dict[str, object], output_path: Path) -> None:
 def print_summary(results: dict[str, object]) -> None:
     print(
         "\n| Strategy | Selected Gen | Final Train Acc | Validation Acc | Test Acc | "
-        "Test MSE | Test ROC-AUC | Final GCV | Lambda |"
+        "Test CE | Test Brier | Test ECE | Test ROC-AUC |"
     )
     print("|---|---:|---:|---:|---:|---:|---:|---:|---:|")
     for strategy, payload in results.items():
@@ -549,10 +558,10 @@ def print_summary(results: dict[str, object]) -> None:
             f"{float(metrics['final_train_acc']):.4f} | "
             f"{float(metrics['validation_acc']):.4f} | "
             f"{float(metrics['test_acc']):.4f} | "
-            f"{float(metrics['test_mse']):.6f} | "
-            f"{float(metrics['test_roc_auc']):.4f} | "
-            f"{float(metrics['final_gcv']):.6f} | "
-            f"{float(metrics['final_lambda']):.2e} |"
+            f"{float(metrics['test_ce']):.6f} | "
+            f"{float(metrics['test_brier']):.6f} | "
+            f"{float(metrics['test_ece']):.6f} | "
+            f"{float(metrics['test_roc_auc']):.4f} |"
         )
 
 
@@ -562,7 +571,7 @@ def print_aggregate_summary(summary: dict[str, object], strategies: list[str]) -
         if dataset_label == "overall":
             continue
         print(f"\n### {dataset_label}")
-        print("| Strategy | Runs | Val Acc | Test Acc | Test MSE | Test ROC-AUC | Final GCV | Lambda |")
+        print("| Strategy | Runs | Val Acc | Test Acc | Test CE | Test Brier | Test ECE | Test ROC-AUC |")
         print("|---|---:|---:|---:|---:|---:|---:|---:|")
         for strategy in strategies:
             stats = dataset_summary[strategy]
@@ -570,14 +579,14 @@ def print_aggregate_summary(summary: dict[str, object], strategies: list[str]) -
                 f"| {strategy} | {int(stats['n_runs'])} | "
                 f"{_format_mean_std(stats['validation_acc'])} | "
                 f"{_format_mean_std(stats['test_acc'])} | "
-                f"{_format_mean_std(stats['test_mse'])} | "
+                f"{_format_mean_std(stats['test_ce'])} | "
+                f"{_format_mean_std(stats['test_brier'])} | "
+                f"{_format_mean_std(stats['test_ece'])} | "
                 f"{_format_mean_std(stats['test_roc_auc'])} | "
-                f"{_format_mean_std(stats['final_gcv'])} | "
-                f"{_format_mean_std(stats['final_lambda'])} |"
             )
 
     print("\n### Overall")
-    print("| Strategy | Runs | Val Acc | Test Acc | Test MSE | Test ROC-AUC | Final GCV | Lambda |")
+    print("| Strategy | Runs | Val Acc | Test Acc | Test CE | Test Brier | Test ECE | Test ROC-AUC |")
     print("|---|---:|---:|---:|---:|---:|---:|---:|")
     for strategy in strategies:
         stats = summary["overall"][strategy]
@@ -585,10 +594,10 @@ def print_aggregate_summary(summary: dict[str, object], strategies: list[str]) -
             f"| {strategy} | {int(stats['n_runs'])} | "
             f"{_format_mean_std(stats['validation_acc'])} | "
             f"{_format_mean_std(stats['test_acc'])} | "
-            f"{_format_mean_std(stats['test_mse'])} | "
+            f"{_format_mean_std(stats['test_ce'])} | "
+            f"{_format_mean_std(stats['test_brier'])} | "
+            f"{_format_mean_std(stats['test_ece'])} | "
             f"{_format_mean_std(stats['test_roc_auc'])} | "
-            f"{_format_mean_std(stats['final_gcv'])} | "
-            f"{_format_mean_std(stats['final_lambda'])} |"
         )
 
 

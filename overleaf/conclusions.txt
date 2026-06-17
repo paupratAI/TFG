@@ -1,0 +1,222 @@
+
+\section{Conclusions}
+\label{sec:conclusions}
+
+This thesis studied a Michigan-style evolutionary architecture for a
+single-hidden-layer neural network. The main idea was to evolve hidden neurons
+as individuals, form the hidden layer from the surviving population, and fit
+the output layer separately. The final prototype keeps this hidden
+representation fixed across tasks, but uses an output layer that matches the
+problem: logistic cross-entropy for binary classification, Ridge/GCV for
+regression, and softmax cross-entropy for multiclass classification.
+
+\subsection{Assessment of the Objectives}
+\label{subsec:conclusions_objectives}
+
+The first objective was to implement a single-hidden-layer neural network in
+which the hidden neurons are evolved with a Michigan-style Evolution Strategy.
+This objective was achieved. The final prototype defines each individual as
+one tanh hidden neuron with its own genotype and self-adaptive mutation
+matrix. The population collectively forms the hidden layer, and the output
+layer is fitted after selection.
+
+The second objective was to study credit assignment in this representation.
+This objective was also achieved. Four selection strategies were implemented
+and compared: OMP residual selection, marginal $R^2$ with diversity penalty,
+CFS, and CFS-AUC. The experiments show that the selection criterion has a
+large effect on performance. CFS is the strongest overall strategy in the main
+binary logistic benchmark.
+
+The third objective was to evaluate the binary logistic architecture against
+standard baselines and ablations. This objective was achieved with a balanced
+result. ES-CFS Logistic CE improves over the linear logistic and random tanh
+logistic ablations, which supports the value of the evolved representation.
+However, the strongest classical tabular baselines, especially RBF SVM and
+Random Forest, still obtain higher average test accuracy in the tested binary
+datasets. The conclusion is therefore not that the prototype dominates
+classical models, but that the Michigan representation adds measurable value
+inside the logistic neural architecture.
+
+The fourth objective was to test related extensions. This was partially
+achieved and produced useful results. The regression benchmark shows that the
+evolved representation improves a closed-form Ridge/GCV output model over
+linear and random-feature Ridge variants in the tested regression settings.
+The L1-logistic experiment shows that the final hidden layer can be strongly
+sparsified while preserving nearly the same test accuracy and improving
+probability quality. The softmax benchmark shows that the evolved
+representation can also be used in multiclass probabilistic classification.
+These extensions are not exhaustive benchmark studies, but they add clear
+value to the project.
+
+The fifth objective was to compare the Michigan representation with a
+Pittsburgh-style evolutionary representation. This objective was achieved in
+the final experiment. Under a controlled setup, Michigan ES-CFS obtains higher
+test accuracy and ROC-AUC, a smaller validation-test gap, and lower runtime
+than the Pittsburgh alternatives. This is the result most directly aligned
+with the original motivation of the thesis.
+
+\subsection{Main Technical Conclusions}
+\label{subsec:conclusions_technical}
+
+The main technical conclusion is that separating hidden-representation search
+from output-layer fitting is a useful design. The ES searches for nonlinear
+tanh neurons, while the output layer is fitted afterwards with a task-specific
+model. This makes the architecture different from both standard
+backpropagation and conventional Pittsburgh neuroevolution.
+
+The second conclusion is that the Michigan representation is meaningful only
+if credit assignment is handled carefully. A population of neurons is not
+automatically a good hidden layer; the selection strategy determines whether
+the algorithm keeps complementary neurons or wastes capacity on redundancy.
+
+The third conclusion is that the output layer should not be treated as a
+minor implementation detail. Ridge/GCV is very useful for regression because
+it gives an analytical and automatically regularised output solve. For
+classification, logistic and softmax outputs are more appropriate because
+they produce probabilities and can be evaluated with cross-entropy,
+calibration error, and ROC-AUC. The price is that the closed-form GCV
+advantage is lost in the probabilistic classifiers.
+
+Finally, the controlled Michigan--Pittsburgh comparison gives the clearest
+support for the original idea. Under the tested setting, evolving individual
+neurons gives a better accuracy-time trade-off than evolving complete hidden
+layers. This does not make the method a universal benchmark winner, but it
+does show that the architecture is coherent and empirically defensible.
+
+\subsection{Limitations}
+\label{subsec:conclusions_limitations}
+
+The main limitation is the scale of the evaluation. The experiments are
+reproducible and cover several directions, but they are still small compared
+with a full benchmark study. More datasets, more seeds, and paired
+statistical tests would be needed before making broad claims.
+
+A second limitation is experimental scope. Regression, sparse logistic
+filtering, and softmax are evaluated as targeted extensions rather than as a
+single unified modelling framework. The Pittsburgh comparison is also a
+controlled baseline designed to isolate representation, not a judgement on
+every possible Pittsburgh algorithm.
+
+Finally, probability quality remains an issue in the logistic variants. The
+unregularised logistic output can reach good accuracy but sometimes becomes
+overconfident when the selected hidden representation is nearly separable.
+This motivates further work on calibration, regularised logistic output
+layers, or early-stopping criteria based directly on probabilistic metrics.
+
+\subsection{Future Work}
+\label{subsec:conclusions_future}
+
+Future work should first expand the benchmark to more OpenML datasets and
+more seeds. This would make the empirical conclusions stronger and allow
+paired comparisons between Michigan, Pittsburgh, standard baselines, and
+ablations.
+
+A second direction is to integrate binary logistic classification, Ridge/GCV
+regression, softmax classification, and sparse logistic filtering into one
+cleaner training framework. A third direction is to study neuron stability: which neurons
+survive across seeds, which neurons are removed by the sparse output layer,
+and whether active neurons correspond to meaningful feature interactions.
+Finally, the computational cost could be analysed more formally in terms of
+dataset size, hidden width, offspring count, selection cost, and number of
+output fits.
+
+\subsection{Final Remark}
+\label{subsec:conclusions_final_remark}
+
+The project began with a simple question: can a neural hidden layer be evolved
+as a population of individual neurons rather than as a complete network? The
+answer from this prototype is cautiously positive. The method is not a
+universal replacement for backpropagation or for classical tabular models, but
+it is a coherent and competitive architecture. It shows that a Michigan-style
+representation can be combined with a one-hidden-layer MLP and task-specific
+output fitting, and that this combination can offer a meaningful
+accuracy-time trade-off compared with evolving complete hidden layers.
+
+\begin{thebibliography}{99}
+
+\bibitem{bishop2006prml}
+Christopher M. Bishop.
+\newblock \emph{Pattern Recognition and Machine Learning}.
+\newblock Springer, 2006.
+
+\bibitem{goodfellow2016deep}
+Ian Goodfellow, Yoshua Bengio, and Aaron Courville.
+\newblock \emph{Deep Learning}.
+\newblock MIT Press, 2016.
+
+\bibitem{rumelhart1986backprop}
+David E. Rumelhart, Geoffrey E. Hinton, and Ronald J. Williams.
+\newblock Learning representations by back-propagating errors.
+\newblock \emph{Nature}, 323:533--536, 1986.
+
+\bibitem{holland1975adaptation}
+John H. Holland.
+\newblock \emph{Adaptation in Natural and Artificial Systems}.
+\newblock University of Michigan Press, 1975.
+
+\bibitem{goldberg1989ga}
+David E. Goldberg.
+\newblock \emph{Genetic Algorithms in Search, Optimization, and Machine Learning}.
+\newblock Addison-Wesley, 1989.
+
+\bibitem{back1996evolutionary}
+Thomas Back.
+\newblock \emph{Evolutionary Algorithms in Theory and Practice}.
+\newblock Oxford University Press, 1996.
+
+\bibitem{schwefel1995evolution}
+Hans-Paul Schwefel.
+\newblock \emph{Evolution and Optimum Seeking}.
+\newblock Wiley, 1995.
+
+\bibitem{beyer2002es}
+Hans-Georg Beyer and Hans-Paul Schwefel.
+\newblock Evolution strategies: A comprehensive introduction.
+\newblock \emph{Natural Computing}, 1:3--52, 2002.
+
+\bibitem{yao1999eann}
+Xin Yao.
+\newblock Evolving artificial neural networks.
+\newblock \emph{Proceedings of the IEEE}, 87(9):1423--1447, 1999.
+
+\bibitem{stanley2002neat}
+Kenneth O. Stanley and Risto Miikkulainen.
+\newblock Evolving neural networks through augmenting topologies.
+\newblock \emph{Evolutionary Computation}, 10(2):99--127, 2002.
+
+\bibitem{salimans2017es}
+Tim Salimans, Jonathan Ho, Xi Chen, Szymon Sidor, and Ilya Sutskever.
+\newblock Evolution strategies as a scalable alternative to reinforcement learning.
+\newblock arXiv preprint, 2017.
+
+\bibitem{hoerl1970ridge}
+Arthur E. Hoerl and Robert W. Kennard.
+\newblock Ridge regression: Biased estimation for nonorthogonal problems.
+\newblock \emph{Technometrics}, 12(1):55--67, 1970.
+
+\bibitem{golub1979gcv}
+Gene H. Golub, Michael Heath, and Grace Wahba.
+\newblock Generalized cross-validation as a method for choosing a good ridge parameter.
+\newblock \emph{Technometrics}, 21(2):215--223, 1979.
+
+\bibitem{pati1993omp}
+Yagyensh Chandra Pati, Ramin Rezaiifar, and P. S. Krishnaprasad.
+\newblock Orthogonal matching pursuit: Recursive function approximation with applications to wavelet decomposition.
+\newblock In \emph{Proceedings of the 27th Asilomar Conference on Signals, Systems and Computers}, pages 40--44, 1993.
+
+\bibitem{hall1999cfs}
+Mark A. Hall.
+\newblock \emph{Correlation-based Feature Selection for Machine Learning}.
+\newblock PhD thesis, University of Waikato, 1999.
+
+\bibitem{tibshirani1996lasso}
+Robert Tibshirani.
+\newblock Regression shrinkage and selection via the lasso.
+\newblock \emph{Journal of the Royal Statistical Society: Series B}, 58(1):267--288, 1996.
+
+\bibitem{vanschoren2013openml}
+Joaquin Vanschoren, Jan N. van Rijn, Bernd Bischl, and Luis Torgo.
+\newblock OpenML: Networked science in machine learning.
+\newblock \emph{SIGKDD Explorations}, 15(2):49--60, 2013.
+
+\end{thebibliography}

@@ -1,0 +1,205 @@
+\section{Introduction}
+\label{sec:introduction}
+
+\subsection{What the Project Studies}
+\label{subsec:intro_what}
+
+Neural networks are usually associated with gradient-based training. In most
+modern applications, the parameters of a network are adjusted by
+backpropagation: the loss is differentiated with respect to the weights, and an
+optimiser such as stochastic gradient descent or Adam updates all parameters
+jointly. This approach has been extraordinarily successful, and it is the
+standard choice in deep learning. However, it is not the only way to train a
+neural model. Evolutionary algorithms offer a different view: instead of
+following gradients, they search directly in a space of candidate solutions,
+using variation and selection. This project studies that alternative in a
+specific and controlled setting: a single-hidden-layer neural network for
+tabular data.
+
+The central idea of the thesis is to train the hidden representation of a
+Multilayer Perceptron (MLP) with an Evolution Strategy (ES), but not in the
+usual way of evolving a whole network as one individual. The implemented
+prototype uses a Michigan-style representation. Each individual in the
+evolutionary population is one hidden neuron: its input weights, its bias, and
+its own mutation strategy. The complete hidden layer is formed by the surviving
+population of neurons. Once this hidden representation has been selected, the
+output layer is fitted separately with a model that matches the task. Binary
+classification uses a logistic output trained with cross-entropy, regression
+uses Ridge regression with Generalised Cross-Validation (GCV), and multiclass
+classification uses a softmax output. In all cases, the hidden layer is not
+updated by backpropagation.
+
+This design was chosen because it separates two problems that are usually
+solved together. The first problem is representation learning: finding a set of
+nonlinear hidden neurons that transforms the input data into useful features.
+The second problem is output fitting: combining those features to predict the
+target. For regression, the second problem has a closed-form Ridge/GCV
+solution once the hidden activations are fixed. For classification, the output
+layer is fitted as a logistic or softmax model so that the predictions are
+probabilities rather than least-squares scores. Therefore, the evolutionary
+search can focus on discovering a useful hidden layer, while the final output
+model remains simple and task-specific. This is conceptually different from a
+conventional gradient-trained MLP, where all weights are adjusted together
+through the same loss.
+
+The representation is also different from the more common Pittsburgh-style
+neuroevolution approach. In a Pittsburgh representation, each individual
+encodes a complete model, for example an entire hidden layer or a whole neural
+network. This is natural and easy to evaluate: one chromosome corresponds to
+one candidate solution. However, it also means that every individual must be
+evaluated as a full model. In the proposed Michigan formulation, the search is
+performed at the level of individual hidden neurons. This makes the evaluation
+problem less direct, because one neuron does not produce a prediction alone.
+The main technical challenge is therefore credit assignment: deciding which
+neurons are useful members of a cooperative hidden layer.
+
+The project began with the question of whether this neuron-level evolutionary
+formulation could be useful in practice. More concretely, the thesis asks
+whether a single-hidden-layer network whose neurons are evolved as individuals
+can obtain competitive performance on tabular problems, whether it can do so
+with a meaningful computational advantage over evolving whole hidden layers,
+and whether the resulting architecture can be extended beyond the initial
+binary classification setting.
+
+\subsection{Motivation}
+\label{subsec:intro_motivation}
+
+There are several reasons why this problem is interesting. First, tabular data
+remain important in many practical machine-learning applications. Classical
+models such as Support Vector Machines, Random Forests, gradient-boosted trees,
+linear models, and compact MLPs are still strong baselines on tabular
+benchmarks. A new neural training strategy is therefore only interesting if it
+can be compared against such methods honestly, without claiming universal
+superiority from a small number of favourable results.
+
+Second, evolutionary algorithms are useful when gradients are unavailable,
+unreliable, or not the desired modelling tool. In this thesis, the objective is
+not to replace backpropagation in deep learning, but to study a smaller hybrid
+architecture where evolution is used for the hidden representation and
+linear/probabilistic solvers are used for the output layer. This makes the
+system easier to analyse than a large fully evolved neural network.
+
+Third, the Michigan representation creates an interesting computational
+question. A Pittsburgh evolutionary algorithm evaluates complete networks. If
+a population contains many networks, and every network requires an output-layer
+fit, the cost can grow quickly. A Michigan method, on the other hand, can
+generate many candidate neurons, select a cooperative subset, and then solve
+the output layer once for the selected hidden layer. This does not make the
+method automatically faster, because the selection step also has a cost, but
+it changes where the computational effort is spent.
+
+Finally, the project is useful as a design study. During the work, the
+output-layer choice became an important part of the architecture. Ridge/GCV is
+kept for regression, where it is natural and analytically convenient. Logistic
+and softmax outputs are used for binary and multiclass classification, where
+probabilistic predictions are the standard modelling choice. Sparse logistic
+filtering is also studied as a way of removing unnecessary hidden neurons
+after the evolutionary selection step. These variants help clarify which parts
+of the architecture are essential and which parts depend on the prediction
+task.
+
+\subsection{Objectives}
+\label{subsec:intro_objectives}
+
+The objectives of the thesis are the following:
+
+\begin{enumerate}
+    \item To implement a single-hidden-layer neural network in which the hidden
+    neurons are evolved with a Michigan-style Evolution Strategy, while the
+    output layer is fitted separately.
+
+    \item To study the credit-assignment problem created by the Michigan
+    representation, comparing several neuron-selection strategies such as
+    marginal $R^2$, Orthogonal Matching Pursuit (OMP), Correlation-based
+    Feature Selection (CFS), and a ranking-based CFS variant using AUC and
+    Spearman correlation.
+
+    \item To evaluate the binary logistic architecture on tabular
+    classification problems against standard baselines and against ablations
+    that remove the evolved hidden representation.
+
+    \item To test whether the same evolved hidden representation adds value in
+    related settings: regression with Ridge/GCV, output-layer sparsification
+    with L1-logistic filtering, and multiclass probabilistic classification
+    with softmax.
+
+    \item To compare the proposed Michigan representation against a
+    Pittsburgh-style evolutionary representation under a controlled setting
+    where the activation function, hidden width, output formulation, data splits,
+    and validation protocol are shared.
+\end{enumerate}
+
+These objectives are intentionally empirical and architectural. The goal is
+not to prove a new convergence theorem, nor to claim that the method dominates
+all standard algorithms. The goal is to build a working prototype, understand
+its behaviour, and determine whether the Michigan idea has practical value in
+this neural-network setting.
+
+\subsection{Contributions}
+\label{subsec:intro_contributions}
+
+The main contributions of the project are:
+
+\begin{itemize}
+    \item A working implementation of a Michigan-style ES for a
+    single-hidden-layer MLP. Each individual represents one tanh hidden neuron,
+    including its own self-adaptive mutation matrix.
+
+    \item A task-dependent output layer built on top of the same evolved
+    representation: logistic cross-entropy for binary classification,
+    Ridge/GCV for regression, and softmax cross-entropy for multiclass
+    classification.
+
+    \item Several credit-assignment and neuron-selection strategies adapted to
+    the Michigan representation, including OMP-style residual selection, CFS,
+    and CFS-AUC.
+
+    \item A set of reproducible experiments comparing the prototype with
+    standard tabular baselines, logistic and Ridge ablations, regression
+    baselines, L1-logistic filtering, softmax multiclass models, and a
+    Pittsburgh-style evolutionary baseline.
+
+    \item A final Michigan--Pittsburgh comparison showing that, under the
+    tested setting, the Michigan representation obtains a better
+    accuracy-time trade-off and a smaller validation-test gap than evolving
+    complete hidden layers.
+\end{itemize}
+
+The strongest empirical result is not a single maximum accuracy value. It is
+the combination of results: the evolved representation improves over linear
+and random-feature logistic models in binary classification, it improves over
+linear and random-feature Ridge models in regression, L1-logistic filtering
+can remove many selected neurons with little loss in accuracy, softmax extends
+the representation to multiclass classification, and Michigan evolution
+compares favourably with a controlled Pittsburgh alternative.
+
+\subsection{Scope of the Thesis}
+\label{subsec:intro_scope}
+
+It is also useful to state what this thesis does not try to do. The project
+does not attempt to build a large deep-learning system. It does not claim that
+evolutionary algorithms should replace backpropagation for modern deep neural
+networks. It also does not claim state-of-the-art performance on tabular
+benchmarks. The scope is to implement a hybrid neural
+architecture where the representation of the evolutionary population is the
+main research variable.
+
+This scope affects the way results are interpreted. If a classical baseline is
+slightly better on a dataset, that does not automatically make the prototype
+uninteresting. The relevant question is whether the proposed design behaves
+coherently and whether it offers any measurable advantage in the situations it
+was designed for. For example, the logistic binary architecture is valuable
+because it evaluates the evolved representation with a proper probabilistic
+classifier. The Ridge/GCV regression architecture is valuable because it keeps
+the output layer analytically solvable. The softmax variant is valuable
+because it shows how the evolved hidden representation can be used in a
+probabilistic multiclass model. The sparse logistic experiment is valuable
+because it shows that the final hidden layer can be compressed after
+evolutionary selection. The Michigan--Pittsburgh experiment is valuable
+because it tests the initial representation hypothesis directly.
+
+The thesis therefore follows an engineering research style. It starts from a
+conceptual idea, implements it, identifies its weaknesses, improves the
+experimental protocol, and compares the final method against relevant
+alternatives. Negative and mixed results are kept in the discussion because
+they help define what the method can and cannot support.

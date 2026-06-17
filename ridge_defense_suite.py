@@ -1,15 +1,15 @@
 """
-ridge_defense_suite.py — Thesis-oriented experiments for the Ridge/GCV branch.
+ridge_defense_suite.py — Thesis-oriented binary classification experiments.
 
 This suite is deliberately broader than a single strategy comparison. It
 answers the questions that are most useful in a defence:
 
-1) Is ES + Ridge/GCV competitive against standard tabular baselines?
+1) Is ES + logistic output competitive against standard tabular baselines?
 2) What does each architectural ingredient contribute?
-3) How sensitive is Ridge/GCV to lambda?
+3) Are the resulting probabilities useful beyond hard accuracy?
 4) What accuracy/cost trade-off does the prototype occupy?
 
-Outputs are written to runs/ridge_defense by default:
+Outputs are written to runs/binary_logistic by default:
   - summary.json with all raw and aggregate metrics.
   - Several PNG figures.
   - latex_notes.tex with commented figure snippets for manual inclusion.
@@ -38,13 +38,21 @@ import numpy as np
 from sklearn.ensemble import HistGradientBoostingClassifier, RandomForestClassifier
 from sklearn.exceptions import ConvergenceWarning
 from sklearn.linear_model import LogisticRegression
-from sklearn.metrics import accuracy_score, mean_squared_error, roc_auc_score
+from sklearn.metrics import accuracy_score, roc_auc_score
 from sklearn.neural_network import MLPClassifier
 from sklearn.svm import SVC
 
 from core_es import compute_activations
 from data import load_dataset_with_validation
-from gcv import compute_ridge_gcv
+from logistic_output import (
+    binary_brier_score,
+    binary_ece,
+    binary_log_loss_from_proba,
+    compute_logistic_output,
+    labels_to_binary,
+    predict_pm1 as predict_logistic_pm1,
+    predict_proba as predict_logistic_proba,
+)
 from train import train
 
 
@@ -54,10 +62,10 @@ DATASETS = {
     "breast-w": {"id": 15, "name": None, "label": "Breast-W"},
 }
 
-RIDGE_MODELS = (
-    "Linear Ridge+GCV",
-    "Random tanh Ridge+GCV",
-    "ES-CFS Ridge+GCV",
+LOGISTIC_MODELS = (
+    "Linear Logistic CE",
+    "Random tanh Logistic CE",
+    "ES-CFS Logistic CE",
 )
 
 
@@ -111,55 +119,63 @@ def _random_tanh_designs(
     return Phi_tr, Phi_val, Phi_te
 
 
-def _score_metrics(
+def _probability_metrics(
     y_tr: np.ndarray,
     y_val: np.ndarray,
     y_te: np.ndarray,
-    train_scores: np.ndarray,
-    val_scores: np.ndarray,
-    test_scores: np.ndarray,
+    train_proba: np.ndarray,
+    val_proba: np.ndarray,
+    test_proba: np.ndarray,
 ) -> dict[str, float]:
-    y_tr_v = y_tr.reshape(-1)
-    y_val_v = y_val.reshape(-1)
-    y_te_v = y_te.reshape(-1)
-    train_pred = np.where(train_scores >= 0.0, 1.0, -1.0)
-    val_pred = np.where(val_scores >= 0.0, 1.0, -1.0)
-    test_pred = np.where(test_scores >= 0.0, 1.0, -1.0)
+    y_tr_v = np.asarray(y_tr, dtype=np.float64).reshape(-1)
+    y_val_v = np.asarray(y_val, dtype=np.float64).reshape(-1)
+    y_te_v = np.asarray(y_te, dtype=np.float64).reshape(-1)
+    y_tr01 = labels_to_binary(y_tr_v).reshape(-1)
+    y_val01 = labels_to_binary(y_val_v).reshape(-1)
+    y_te01 = labels_to_binary(y_te_v).reshape(-1)
+    train_proba = np.asarray(train_proba, dtype=np.float64).reshape(-1)
+    val_proba = np.asarray(val_proba, dtype=np.float64).reshape(-1)
+    test_proba = np.asarray(test_proba, dtype=np.float64).reshape(-1)
+    train_pred = np.where(train_proba >= 0.5, 1.0, -1.0)
+    val_pred = np.where(val_proba >= 0.5, 1.0, -1.0)
+    test_pred = np.where(test_proba >= 0.5, 1.0, -1.0)
     return {
         "train_acc": float(accuracy_score(y_tr_v, train_pred)),
         "validation_acc": float(accuracy_score(y_val_v, val_pred)),
         "test_acc": float(accuracy_score(y_te_v, test_pred)),
-        "train_mse": float(mean_squared_error(y_tr_v, train_scores)),
-        "validation_mse": float(mean_squared_error(y_val_v, val_scores)),
-        "test_mse": float(mean_squared_error(y_te_v, test_scores)),
-        "validation_roc_auc": float(
-            roc_auc_score((y_val_v > 0.0).astype(int), val_scores)
-        ),
-        "test_roc_auc": float(roc_auc_score((y_te_v > 0.0).astype(int), test_scores)),
+        "train_ce": binary_log_loss_from_proba(y_tr01, train_proba),
+        "validation_ce": binary_log_loss_from_proba(y_val01, val_proba),
+        "test_ce": binary_log_loss_from_proba(y_te01, test_proba),
+        "train_brier": binary_brier_score(y_tr01, train_proba),
+        "validation_brier": binary_brier_score(y_val01, val_proba),
+        "test_brier": binary_brier_score(y_te01, test_proba),
+        "train_ece": binary_ece(y_tr01, train_proba),
+        "validation_ece": binary_ece(y_val01, val_proba),
+        "test_ece": binary_ece(y_te01, test_proba),
+        "validation_roc_auc": float(roc_auc_score(y_val01, val_proba)),
+        "test_roc_auc": float(roc_auc_score(y_te01, test_proba)),
     }
 
 
-def _fit_ridge_scores(
+def _fit_logistic_proba(
     Phi_tr: np.ndarray,
     Phi_val: np.ndarray,
     Phi_te: np.ndarray,
     y_tr: np.ndarray,
-    lambda_override: float | None = None,
-) -> tuple[float, float, np.ndarray, np.ndarray, np.ndarray, float]:
+) -> tuple[np.ndarray, np.ndarray, np.ndarray, float, int]:
     fit_t0 = time.perf_counter()
-    lam, beta, gcv = compute_ridge_gcv(Phi_tr, y_tr, lambda_override=lambda_override)
+    beta, _, n_iter = compute_logistic_output(Phi_tr, y_tr)
     fit_seconds = time.perf_counter() - fit_t0
     return (
-        float(lam),
-        float(gcv) if np.isfinite(gcv) else np.nan,
-        (Phi_tr @ beta).reshape(-1),
-        (Phi_val @ beta).reshape(-1),
-        (Phi_te @ beta).reshape(-1),
+        predict_logistic_proba(Phi_tr, beta).reshape(-1),
+        predict_logistic_proba(Phi_val, beta).reshape(-1),
+        predict_logistic_proba(Phi_te, beta).reshape(-1),
         float(fit_seconds),
+        int(n_iter),
     )
 
 
-def fit_linear_ridge(
+def fit_linear_logistic(
     X_tr: np.ndarray,
     X_val: np.ndarray,
     X_te: np.ndarray,
@@ -167,26 +183,25 @@ def fit_linear_ridge(
     y_val: np.ndarray,
     y_te: np.ndarray,
 ) -> dict[str, object]:
-    lam, gcv, train_scores, val_scores, test_scores, fit_seconds = _fit_ridge_scores(
+    train_p, val_p, test_p, fit_seconds, n_iter = _fit_logistic_proba(
         _linear_design(X_tr),
         _linear_design(X_val),
         _linear_design(X_te),
         y_tr,
     )
     row: dict[str, object] = {
-        "model": "Linear Ridge+GCV",
-        "family": "ridge",
-        "lambda": lam,
-        "gcv": gcv,
+        "model": "Linear Logistic CE",
+        "family": "logistic",
+        "output_n_iter": n_iter,
         "fit_seconds": fit_seconds,
         "hidden_units": 0,
-        "selected_by": "gcv",
+        "selected_by": "cross_entropy",
     }
-    row.update(_score_metrics(y_tr, y_val, y_te, train_scores, val_scores, test_scores))
+    row.update(_probability_metrics(y_tr, y_val, y_te, train_p, val_p, test_p))
     return row
 
 
-def fit_random_tanh_ridge(
+def fit_random_tanh_logistic(
     X_tr: np.ndarray,
     X_val: np.ndarray,
     X_te: np.ndarray,
@@ -206,30 +221,27 @@ def fit_random_tanh_ridge(
             hidden_units=hidden_units,
             seed=seed + hidden_units * 17,
         )
-        lam, gcv, train_scores, val_scores, test_scores, fit_seconds = _fit_ridge_scores(
+        train_p, val_p, test_p, fit_seconds, n_iter = _fit_logistic_proba(
             Phi_tr,
             Phi_val,
             Phi_te,
             y_tr,
         )
         row: dict[str, object] = {
-            "model": "Random tanh Ridge+GCV",
-            "family": "ridge",
-            "lambda": lam,
-            "gcv": gcv,
+            "model": "Random tanh Logistic CE",
+            "family": "logistic",
+            "output_n_iter": n_iter,
             "fit_seconds": fit_seconds,
             "hidden_units": int(hidden_units),
-            "selected_by": "validation_acc_penalised_by_mse",
+            "selected_by": "validation_acc_then_ce",
         }
-        row.update(_score_metrics(y_tr, y_val, y_te, train_scores, val_scores, test_scores))
-        row["selection_score"] = float(row["validation_acc"]) - 0.05 * np.log1p(
-            float(row["validation_mse"])
-        )
+        row.update(_probability_metrics(y_tr, y_val, y_te, train_p, val_p, test_p))
+        row["selection_score"] = float(row["validation_acc"]) - 0.05 * float(row["validation_ce"])
         candidates.append(row)
         if best is None or float(row["selection_score"]) > float(best["selection_score"]):
             best = row
     if best is None:
-        raise RuntimeError("No random tanh Ridge candidates were evaluated.")
+        raise RuntimeError("No random tanh Logistic candidates were evaluated.")
     return dict(best), candidates
 
 
@@ -253,25 +265,31 @@ def fit_es_cfs(
             data_home=args.data_home,
             verbose=999,
             seed=seed,
+            output_layer="logistic",
             save_dir=None,
         )
     fit_seconds = time.perf_counter() - fit_t0
     metrics = state.metrics
     return {
-        "model": "ES-CFS Ridge+GCV",
-        "family": "ridge",
+        "model": "ES-CFS Logistic CE",
+        "family": "logistic",
         "fit_seconds": float(fit_seconds),
-        "lambda": metrics.get("final_lambda"),
-        "gcv": metrics.get("final_gcv"),
+        "output_n_iter": metrics.get("output_n_iter"),
         "hidden_units": int(args.es_mu),
         "selected_epoch": metrics.get("selected_epoch"),
-        "selected_by": "validation_acc_then_mse",
+        "selected_by": "validation_acc_then_ce",
         "train_acc": metrics.get("final_train_acc"),
         "validation_acc": metrics.get("validation_acc"),
         "test_acc": metrics.get("test_acc"),
-        "train_mse": metrics.get("train_mse"),
-        "validation_mse": metrics.get("validation_mse"),
-        "test_mse": metrics.get("test_mse"),
+        "train_ce": metrics.get("train_ce"),
+        "validation_ce": metrics.get("validation_ce"),
+        "test_ce": metrics.get("test_ce"),
+        "train_brier": metrics.get("train_brier"),
+        "validation_brier": metrics.get("validation_brier"),
+        "test_brier": metrics.get("test_brier"),
+        "train_ece": metrics.get("train_ece"),
+        "validation_ece": metrics.get("validation_ece"),
+        "test_ece": metrics.get("test_ece"),
         "validation_roc_auc": metrics.get("validation_roc_auc"),
         "test_roc_auc": metrics.get("test_roc_auc"),
     }
@@ -368,7 +386,9 @@ def summarise_rows(rows: list[dict[str, object]]) -> dict[str, object]:
         "test_acc",
         "validation_roc_auc",
         "test_roc_auc",
-        "test_mse",
+        "test_ce",
+        "test_brier",
+        "test_ece",
         "fit_seconds",
     )
     summary: dict[str, object] = {"overall": {}, "by_dataset": {}}
@@ -449,10 +469,10 @@ def run_baseline_suite(args: argparse.Namespace) -> dict[str, object]:
                 data_home=args.data_home,
             )
 
-            linear = fit_linear_ridge(X_tr, X_val, X_te, y_tr, y_val, y_te)
+            linear = fit_linear_logistic(X_tr, X_val, X_te, y_tr, y_val, y_te)
             rows.append({**linear, "dataset": dataset["label"], "seed": seed})
 
-            random_tanh, candidates = fit_random_tanh_ridge(
+            random_tanh, candidates = fit_random_tanh_logistic(
                 X_tr,
                 X_val,
                 X_te,
@@ -492,60 +512,6 @@ def run_baseline_suite(args: argparse.Namespace) -> dict[str, object]:
     }
 
 
-def run_lambda_sensitivity(args: argparse.Namespace) -> dict[str, object]:
-    dataset = DATASETS[args.diagnostic_dataset]
-    seed = args.diagnostic_seed
-    X_tr, X_val, X_te, y_tr, y_val, y_te = load_dataset_with_validation(
-        data_id=int(dataset["id"]),
-        data_name=dataset["name"],
-        version=args.data_version,
-        validation_size=args.validation_size,
-        test_size=args.test_size,
-        seed=seed,
-        data_home=args.data_home,
-    )
-    Phi_tr, Phi_val, Phi_te = _random_tanh_designs(
-        X_tr,
-        X_val,
-        X_te,
-        hidden_units=args.diagnostic_hidden_units,
-        seed=seed + 1000,
-    )
-    gcv_lam, gcv, train_scores, val_scores, test_scores, fit_seconds = _fit_ridge_scores(
-        Phi_tr,
-        Phi_val,
-        Phi_te,
-        y_tr,
-    )
-    gcv_row = {
-        "lambda": gcv_lam,
-        "gcv": gcv,
-        "fit_seconds": fit_seconds,
-        "kind": "gcv_selected",
-    }
-    gcv_row.update(_score_metrics(y_tr, y_val, y_te, train_scores, val_scores, test_scores))
-
-    rows: list[dict[str, object]] = []
-    for lam in args.lambda_grid:
-        _, _, train_s, val_s, test_s, fit_s = _fit_ridge_scores(
-            Phi_tr,
-            Phi_val,
-            Phi_te,
-            y_tr,
-            lambda_override=float(lam),
-        )
-        row = {"lambda": float(lam), "kind": "fixed", "fit_seconds": fit_s}
-        row.update(_score_metrics(y_tr, y_val, y_te, train_s, val_s, test_s))
-        rows.append(row)
-    return {
-        "dataset": dataset["label"],
-        "seed": seed,
-        "hidden_units": args.diagnostic_hidden_units,
-        "gcv_selected": gcv_row,
-        "fixed_lambda_rows": rows,
-    }
-
-
 def save_baseline_accuracy_plot(payload: dict[str, object], output_path: Path) -> None:
     output_path.parent.mkdir(parents=True, exist_ok=True)
     summary = payload["summary"]["by_dataset"]
@@ -568,7 +534,7 @@ def save_baseline_accuracy_plot(payload: dict[str, object], output_path: Path) -
             summary[dataset][model].get("test_acc", {"std": 0.0})["std"]
             for model in models
         ]
-        colors = ["#2f6f9f" if model in RIDGE_MODELS else "#b36b2c" for model in models]
+        colors = ["#2f6f9f" if model in LOGISTIC_MODELS else "#b36b2c" for model in models]
         ax.bar(x, means, yerr=stds, capsize=3, color=colors)
         ax.set_title(f"{dataset}: test accuracy across seeds")
         ax.set_ylabel("Test accuracy")
@@ -576,7 +542,7 @@ def save_baseline_accuracy_plot(payload: dict[str, object], output_path: Path) -
         ax.set_xticks(x)
         ax.set_xticklabels(models, rotation=18, ha="right")
         ax.grid(True, axis="y", alpha=0.25)
-    fig.suptitle("Ridge prototype against standard tabular baselines")
+    fig.suptitle("Logistic ES prototype against standard tabular baselines")
     fig.savefig(output_path, dpi=180)
     plt.close(fig)
 
@@ -591,7 +557,7 @@ def save_accuracy_time_plot(payload: dict[str, object], output_path: Path) -> No
         y = overall[model]["test_acc"]["mean"]
         xerr = overall[model]["fit_seconds"]["std"]
         yerr = overall[model]["test_acc"]["std"]
-        color = "#2f6f9f" if model in RIDGE_MODELS else "#b36b2c"
+        color = "#2f6f9f" if model in LOGISTIC_MODELS else "#b36b2c"
         ax.errorbar(
             x,
             y,
@@ -613,10 +579,10 @@ def save_accuracy_time_plot(payload: dict[str, object], output_path: Path) -> No
     plt.close(fig)
 
 
-def save_ridge_ablation_plot(payload: dict[str, object], output_path: Path) -> None:
+def save_logistic_ablation_plot(payload: dict[str, object], output_path: Path) -> None:
     output_path.parent.mkdir(parents=True, exist_ok=True)
     overall = payload["summary"]["overall"]
-    models = [model for model in RIDGE_MODELS if model in overall]
+    models = [model for model in LOGISTIC_MODELS if model in overall]
     x = np.arange(len(models))
     width = 0.36
     val_means = [overall[model]["validation_acc"]["mean"] for model in models]
@@ -645,48 +611,31 @@ def save_ridge_ablation_plot(payload: dict[str, object], output_path: Path) -> N
     axes[1].set_xticklabels(models, rotation=15, ha="right")
     axes[1].grid(True, axis="y", alpha=0.25)
 
-    fig.suptitle("Ablation: linear output vs random features vs evolved features")
+    fig.suptitle("Logistic ablation: linear features vs random features vs evolved features")
     fig.savefig(output_path, dpi=180)
     plt.close(fig)
 
 
-def save_lambda_sensitivity_plot(payload: dict[str, object], output_path: Path) -> None:
+def save_probability_metrics_plot(payload: dict[str, object], output_path: Path) -> None:
     output_path.parent.mkdir(parents=True, exist_ok=True)
-    rows = sorted(payload["fixed_lambda_rows"], key=lambda row: float(row["lambda"]))
-    lambdas = np.asarray([float(row["lambda"]) for row in rows])
-    val_acc = np.asarray([float(row["validation_acc"]) for row in rows])
-    test_acc = np.asarray([float(row["test_acc"]) for row in rows])
-    val_mse = np.asarray([float(row["validation_mse"]) for row in rows])
-    test_mse = np.asarray([float(row["test_mse"]) for row in rows])
-    gcv_lam = float(payload["gcv_selected"]["lambda"])
-
-    fig, axes = plt.subplots(1, 2, figsize=(12.0, 4.8), constrained_layout=True)
-    axes[0].plot(lambdas, val_acc, marker="o", label="Validation")
-    axes[0].plot(lambdas, test_acc, marker="o", label="Test")
-    axes[0].axvline(gcv_lam, color="black", linestyle="--", linewidth=1.3, label="GCV lambda")
-    axes[0].set_xscale("log")
-    axes[0].set_ylim(0.0, 1.02)
-    axes[0].set_title("Accuracy sensitivity")
-    axes[0].set_xlabel("Fixed lambda")
-    axes[0].set_ylabel("Accuracy")
-    axes[0].grid(True, alpha=0.25)
-    axes[0].legend()
-
-    axes[1].plot(lambdas, val_mse, marker="o", label="Validation")
-    axes[1].plot(lambdas, test_mse, marker="o", label="Test")
-    axes[1].axvline(gcv_lam, color="black", linestyle="--", linewidth=1.3, label="GCV lambda")
-    axes[1].set_xscale("log")
-    axes[1].set_yscale("log")
-    axes[1].set_title("Score-MSE sensitivity")
-    axes[1].set_xlabel("Fixed lambda")
-    axes[1].set_ylabel("MSE")
-    axes[1].grid(True, alpha=0.25)
-    axes[1].legend()
-
-    fig.suptitle(
-        f"Lambda sensitivity on {payload['dataset']} "
-        f"(H={payload['hidden_units']}, seed={payload['seed']})"
-    )
+    overall = payload["summary"]["overall"]
+    models = [model for model in LOGISTIC_MODELS if model in overall]
+    x = np.arange(len(models))
+    fig, axes = plt.subplots(1, 3, figsize=(14.5, 4.8), constrained_layout=True)
+    specs = [
+        ("test_ce", "Test cross-entropy"),
+        ("test_brier", "Test Brier score"),
+        ("test_ece", "Test ECE"),
+    ]
+    for ax, (metric, title) in zip(axes, specs):
+        means = [overall[model][metric]["mean"] for model in models]
+        stds = [overall[model][metric]["std"] for model in models]
+        ax.bar(x, means, yerr=stds, capsize=3, color="#2f6f9f")
+        ax.set_title(title)
+        ax.set_xticks(x)
+        ax.set_xticklabels(models, rotation=15, ha="right")
+        ax.grid(True, axis="y", alpha=0.25)
+    fig.suptitle("Probability-quality metrics for the binary logistic architecture")
     fig.savefig(output_path, dpi=180)
     plt.close(fig)
 
@@ -696,7 +645,7 @@ def save_ranking_plot(ranks: dict[str, object], output_path: Path) -> None:
     models = sorted(ranks, key=lambda model: ranks[model]["mean"])
     means = [ranks[model]["mean"] for model in models]
     stds = [ranks[model]["std"] for model in models]
-    colors = ["#2f6f9f" if model in RIDGE_MODELS else "#b36b2c" for model in models]
+    colors = ["#2f6f9f" if model in LOGISTIC_MODELS else "#b36b2c" for model in models]
     fig, ax = plt.subplots(figsize=(11.5, 5.2), constrained_layout=True)
     ax.bar(np.arange(len(models)), means, yerr=stds, capsize=3, color=colors)
     ax.set_title("Mean test-accuracy rank across dataset/seed pairs")
@@ -716,10 +665,10 @@ def write_latex_notes(paths: dict[str, Path], output_path: Path) -> None:
         "",
     ]
     captions = {
-        "baseline_accuracy": "Comparison between the Ridge prototype and standard tabular baselines.",
-        "accuracy_time": "Accuracy/cost trade-off across Ridge and non-Ridge models.",
-        "ridge_ablation": "Ablation of the Ridge architecture: linear features, random tanh features, and evolved CFS features.",
-        "lambda_sensitivity": "Sensitivity of Ridge scores to the regularisation parameter lambda.",
+        "baseline_accuracy": "Comparison between the logistic ES prototype and standard tabular baselines.",
+        "accuracy_time": "Accuracy/cost trade-off across logistic ES and non-ES models.",
+        "logistic_ablation": "Ablation of the logistic architecture: linear features, random tanh features, and evolved CFS features.",
+        "probability_metrics": "Probability-quality metrics for the binary logistic architecture.",
         "ranking": "Average test-accuracy rank across dataset/seed pairs.",
     }
     for key, path in paths.items():
@@ -749,8 +698,8 @@ def save_json(payload: dict[str, object], output_path: Path) -> None:
 
 def print_summary(payload: dict[str, object]) -> None:
     print("\n## Overall Test Accuracy")
-    print("| Model | Runs | Val Acc | Test Acc | Test AUC | Fit seconds |")
-    print("|---|---:|---:|---:|---:|---:|")
+    print("| Model | Runs | Val Acc | Test Acc | Test AUC | Test CE | Test Brier | Test ECE | Fit seconds |")
+    print("|---|---:|---:|---:|---:|---:|---:|---:|---:|")
     for model, stats in sorted(
         payload["baseline_suite"]["summary"]["overall"].items(),
         key=lambda item: item[1]["test_acc"]["mean"],
@@ -761,6 +710,9 @@ def print_summary(payload: dict[str, object]) -> None:
             f"{_fmt(stats['validation_acc'])} | "
             f"{_fmt(stats['test_acc'])} | "
             f"{_fmt(stats['test_roc_auc'])} | "
+            f"{_fmt(stats['test_ce']) if 'test_ce' in stats else '-'} | "
+            f"{_fmt(stats['test_brier']) if 'test_brier' in stats else '-'} | "
+            f"{_fmt(stats['test_ece']) if 'test_ece' in stats else '-'} | "
             f"{_fmt(stats['fit_seconds'])} |"
         )
 
@@ -773,19 +725,13 @@ def print_summary(payload: dict[str, object]) -> None:
     ):
         print(f"| {model} | {_fmt(stats)} |")
 
-    lam = payload["lambda_sensitivity"]["gcv_selected"]
-    print("\n## Lambda Sensitivity Diagnostic")
-    print(
-        f"GCV selected lambda={float(lam['lambda']):.4g}, "
-        f"validation acc={float(lam['validation_acc']):.4f}, "
-        f"test acc={float(lam['test_acc']):.4f}, "
-        f"test MSE={float(lam['test_mse']):.4f}."
-    )
+    print("\n## Probability Metrics")
+    print("Binary classification uses logistic probabilities, so CE, Brier, and ECE are reported instead of Ridge score MSE/GCV.")
 
 
 def build_arg_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
-        description="Run thesis-oriented Ridge/GCV defence experiments."
+        description="Run thesis-oriented binary logistic experiments."
     )
     parser.add_argument(
         "--datasets",
@@ -799,20 +745,11 @@ def build_arg_parser() -> argparse.ArgumentParser:
     parser.add_argument("--test-size", type=float, default=0.2)
     parser.add_argument("--validation-size", type=float, default=0.2)
     parser.add_argument("--hidden-units-grid", nargs="+", type=int, default=[16, 32, 64, 128, 256])
-    parser.add_argument(
-        "--lambda-grid",
-        nargs="+",
-        type=float,
-        default=[1e-6, 1e-4, 1e-3, 1e-2, 1e-1, 1.0, 10.0, 100.0, 1000.0],
-    )
-    parser.add_argument("--diagnostic-dataset", choices=sorted(DATASETS), default="ionosphere")
-    parser.add_argument("--diagnostic-seed", type=int, default=42)
-    parser.add_argument("--diagnostic-hidden-units", type=int, default=64)
     parser.add_argument("--es-epochs", type=int, default=60)
     parser.add_argument("--es-mu", type=int, default=50)
     parser.add_argument("--es-offspring", type=int, default=250)
     parser.add_argument("--mlp-max-iter", type=int, default=120)
-    parser.add_argument("--output-dir", default="runs/ridge_defense")
+    parser.add_argument("--output-dir", default="runs/binary_logistic")
     return parser
 
 
@@ -821,25 +758,23 @@ def main() -> None:
     output_dir = Path(args.output_dir)
 
     baseline_suite = run_baseline_suite(args)
-    lambda_sensitivity = run_lambda_sensitivity(args)
 
     payload = {
         "config": vars(args),
         "baseline_suite": baseline_suite,
-        "lambda_sensitivity": lambda_sensitivity,
     }
 
     paths = {
         "baseline_accuracy": output_dir / "baseline_test_accuracy.png",
         "accuracy_time": output_dir / "accuracy_time_tradeoff.png",
-        "ridge_ablation": output_dir / "ridge_ablation.png",
-        "lambda_sensitivity": output_dir / "lambda_sensitivity.png",
+        "logistic_ablation": output_dir / "logistic_ablation.png",
+        "probability_metrics": output_dir / "binary_probability_metrics.png",
         "ranking": output_dir / "test_accuracy_ranking.png",
     }
     save_baseline_accuracy_plot(baseline_suite, paths["baseline_accuracy"])
     save_accuracy_time_plot(baseline_suite, paths["accuracy_time"])
-    save_ridge_ablation_plot(baseline_suite, paths["ridge_ablation"])
-    save_lambda_sensitivity_plot(lambda_sensitivity, paths["lambda_sensitivity"])
+    save_logistic_ablation_plot(baseline_suite, paths["logistic_ablation"])
+    save_probability_metrics_plot(baseline_suite, paths["probability_metrics"])
     save_ranking_plot(baseline_suite["test_accuracy_ranks"], paths["ranking"])
 
     summary_path = output_dir / "summary.json"

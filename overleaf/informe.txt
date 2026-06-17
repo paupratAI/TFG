@@ -1,0 +1,1524 @@
+\section{Background}
+\label{sec:background}
+
+This section introduces the concepts needed to understand the thesis. The aim
+is to focus on the ideas that are
+used directly by the prototype: single-hidden-layer MLPs, backpropagation,
+evolutionary algorithms, Pittsburgh and Michigan representations, Evolution
+Strategies, Ridge regression, GCV, feature selection, regularisation, and
+evaluation metrics.
+
+The main background references used throughout the section are Bishop
+\cite{bishop2006prml} and Goodfellow et al.~\cite{goodfellow2016deep} for
+neural networks, Holland~\cite{holland1975adaptation} and
+Goldberg~\cite{goldberg1989ga} for genetic algorithms, and
+Schwefel~\cite{schwefel1995evolution} together with Beyer and
+Schwefel~\cite{beyer2002es} for Evolution Strategies. The text is
+deliberately selective: each concept is included because it is needed later
+to understand the proposed architecture or the experiments.
+
+\subsection{Supervised Learning and Tabular Data}
+\label{subsec:background_supervised}
+
+In supervised learning, the training data consist of input-output pairs
+\[
+    \{(\mathbf{x}_i, y_i)\}_{i=1}^{m},
+\]
+where $\mathbf{x}_i \in \mathbb{R}^{n}$ is a vector of input features and
+$y_i$ is the target. In binary classification, $y_i$ belongs to one of two
+classes. In regression, $y_i$ is a continuous value. In multiclass
+classification, $y_i$ belongs to one of $K$ possible classes.
+
+The goal is to fit the training data, but while generalizing to unseen
+data. This is why experiments normally use separate training, validation, and
+test splits. The training split is used to fit model parameters. The validation
+split is used to choose hyperparameters, select checkpoints, or compare model
+variants. The test split is used only at the end to estimate performance on
+data that were not used for training or selection.
+
+This separation is especially important in this thesis because several design
+choices could otherwise be biased by the test set. The ES training loop can
+produce many generations, the neuron-selection strategy can be changed, the
+output regularisation can vary, and an L1 penalty can choose different
+sparsity levels. In the final classification experiments this sparsity is
+implemented with an L1-logistic output layer. If all of these choices were made after
+inspecting test accuracy, the
+final result would no longer represent performance on unseen data. For this
+reason, validation metrics are used for checkpoint selection and strategy
+selection whenever possible. The test set is reserved for final reporting.
+
+The datasets in this project are tabular. Each example is represented as a
+fixed-length vector of numeric features. Tabular problems are often less
+structured than image, text, or audio problems, and strong classical baselines
+remain competitive. This is why the experiments compare the proposed method
+against linear Ridge models, logistic regression, Support Vector Machines,
+Random Forests, HistGradientBoosting, and compact gradient-trained MLPs.
+
+\subsection{Multilayer Perceptrons}
+\label{subsec:background_mlp}
+
+A Multilayer Perceptron is a feed-forward neural network. The version studied
+in this thesis has one hidden layer. For an input vector
+$\mathbf{x}\in\mathbb{R}^{n}$, hidden neuron $j$ computes
+\[
+    h_j(\mathbf{x})
+    =
+    \tanh(\mathbf{w}_j^\top \mathbf{x} + b_j),
+\]
+where $\mathbf{w}_j$ is the input weight vector, $b_j$ is the bias, and
+$\tanh$ is the hyperbolic tangent activation function. If the hidden layer has
+$\mu$ neurons, the hidden representation is
+\[
+    \boldsymbol{\phi}(\mathbf{x})
+    =
+    [h_1(\mathbf{x}),\ldots,h_{\mu}(\mathbf{x})]^\top.
+\]
+The output layer then combines these hidden activations.
+
+In a standard neural network, both the input-to-hidden weights and the
+hidden-to-output weights are trained by minimising a loss function. For binary
+classification, a common choice is logistic output with binary cross-entropy.
+For multiclass classification, the usual choice is softmax output with
+categorical cross-entropy. For regression, the usual choice is a linear output
+with squared error. These formulations are described in standard neural
+network texts such as Bishop~\cite{bishop2006prml} and
+Goodfellow et al.~\cite{goodfellow2016deep}.
+
+The prototype in this thesis keeps the same basic feed-forward architecture
+but changes how the hidden layer is trained. The hidden neurons are not
+updated by backpropagation; they are evolved. The output layer is then fitted
+separately.
+
+This separation gives the hidden layer a feature-learning role. Each hidden
+neuron transforms the input space through a nonlinear tanh function. The
+output layer then combines these transformed features. If the hidden neurons
+are useful, the output layer can be simple. If the hidden neurons are poor,
+even a good output solver cannot fully compensate. This is why the ablation
+between linear Ridge, random tanh Ridge, and evolved ES-CFS Ridge is central
+to the experimental section.
+
+\subsection{Single-Hidden-Layer Networks as Feature Maps}
+\label{subsec:background_feature_maps}
+
+A useful way to understand the architecture is to view the hidden layer as a
+learned feature map. The original input vector $\mathbf{x}$ may not be easy to
+separate linearly. After applying the hidden neurons, the model works with
+\[
+    \boldsymbol{\phi}(\mathbf{x})
+    =
+    [\tanh(\mathbf{w}_1^\top\mathbf{x}+b_1),
+    \ldots,
+    \tanh(\mathbf{w}_{\mu}^\top\mathbf{x}+b_{\mu})].
+\]
+The output layer is linear in this transformed space, even though the complete
+model is nonlinear in the original input space. This is the same general idea
+behind many kernel and random-feature methods: a problem that is difficult in
+the original feature space may become easier after a nonlinear transformation.
+
+The quality of this feature map is therefore crucial. If hidden neurons are
+chosen at random, some of them may be useful by chance, especially when the
+hidden layer is wide. However, random features can also waste capacity on
+saturated, redundant, or irrelevant activations. The proposed method tries to
+improve this situation by searching for neurons and selecting a subset that is
+both relevant to the target and not excessively redundant.
+
+This perspective also explains why a single-hidden-layer model is a good test
+bed for the thesis. Deep networks contain many interacting layers, so it is
+difficult to isolate the effect of one representation choice. A single hidden
+layer keeps the model simple enough to analyse: every neuron corresponds to
+one activation column and the final output solve can be studied directly
+through the design matrix. At the same time, the model is still nonlinear and
+can solve problems that a purely linear classifier cannot solve.
+
+The separation between hidden features and output fitting is not meant to
+make the model less neural. The hidden layer
+performs nonlinear representation learning, while the output layer performs a
+supervised model on top of that representation. This decomposition is what
+makes logistic classification, Ridge/GCV regression, L1-logistic filtering,
+and softmax output possible without changing the meaning of the evolved hidden
+neurons.
+
+\subsection{Backpropagation}
+\label{subsec:background_backprop}
+
+Backpropagation computes gradients of a loss function with respect to the
+parameters of a neural network~\cite{rumelhart1986backprop}. It applies the
+chain rule from the output layer backwards through the network. If
+$\mathcal{L}$ is the loss and $\theta$ represents the network parameters, a
+gradient-based optimiser updates the parameters using information from
+$\nabla_{\theta}\mathcal{L}$.
+
+Backpropagation is efficient and is the dominant method for training neural
+networks. However, it also imposes a specific training structure. The model
+must be differentiable with respect to its parameters, and all trainable
+parameters are normally optimised with respect to the same loss. This is a
+strength in deep learning, but it is not the only possible design. In this
+project, backpropagation is used only as a baseline reference. The proposed
+method searches for hidden neurons by evolutionary variation and selection,
+then fits the output layer by a separate solver.
+
+This distinction matters because the proposed architecture is not simply a
+small MLP trained inefficiently. Its training logic is different. It separates
+the nonlinear feature search from the output-layer fit. The question is
+whether that separation can produce a useful model.
+
+Backpropagation also provides a useful contrast for the interpretation of
+error. In a gradient-trained MLP, an error at the output is propagated back to
+all hidden units through derivatives. This gives every hidden weight a
+directional update, but it also means that all hidden units are optimised
+together with respect to the same differentiable objective. In the proposed
+method, hidden neurons do not receive gradients. They survive because their
+activation columns are selected as part of a cooperative subset. The output
+error still matters, but it is used indirectly through feature-selection
+criteria and validation metrics rather than through a gradient signal.
+
+This is why the term "training" has a slightly different meaning in this
+thesis. Training the prototype includes evolutionary search, subset selection,
+Ridge/GCV solving, and validation checkpointing. Only the output-layer
+extensions based on logistic or softmax regression use a conventional
+cross-entropy optimisation step, and even there the hidden neurons remain
+fixed after evolutionary selection.
+
+\subsection{Evolutionary Algorithms}
+\label{subsec:background_ea}
+
+Evolutionary algorithms are optimisation methods inspired by variation and
+selection. A population of candidate solutions is maintained. New candidates
+are generated by mutation, recombination, or both. Candidates are evaluated by
+a fitness criterion, and better candidates are more likely to survive or
+produce offspring. Classic references include Holland's work on adaptation in
+natural and artificial systems~\cite{holland1975adaptation} and Goldberg's
+introduction to genetic algorithms~\cite{goldberg1989ga}. A broader treatment
+of evolutionary algorithms can be found in Back~\cite{back1996evolutionary}.
+
+The advantage of evolutionary algorithms is that they do not require gradients.
+They can optimise discontinuous, noisy, or black-box objectives. The drawback
+is that they can require many evaluations. For neural networks, this cost is
+important: if each individual is a full network, evaluating a population can be
+expensive.
+
+Evolutionary algorithms also make it easy to optimise objects that are not
+standard differentiable parameter tensors. An individual can contain a neural
+weight vector, a mutation step-size parameter, a symbolic rule, a feature
+subset, or a mixture of these elements. This flexibility is one reason why
+evolutionary computation has a long history in neural-network research.
+However, flexibility alone is not enough. The representation must match the
+problem. A poor representation can make the search space unnecessarily large
+or make it difficult to assign credit to individuals.
+
+The most relevant design choice for this thesis is the representation of an
+individual. What does one chromosome or individual encode? In neural-network
+training, the most common answer is that one individual encodes a whole model.
+This is the Pittsburgh view. The alternative used here is the Michigan view:
+one individual encodes a part of the final model.
+
+\subsection{Pittsburgh and Michigan Representations}
+\label{subsec:background_pittsburgh_michigan}
+
+The terms Pittsburgh and Michigan are often used in the context of learning
+classifier systems. In a Pittsburgh-style representation, each individual is a
+complete solution. In a Michigan-style representation, each individual is a
+partial rule, and the population collectively represents the solution. This
+distinction is useful beyond classifier systems because it describes two
+different ways of assigning meaning to individuals in an evolutionary
+population.
+
+For neural networks, the Pittsburgh interpretation is straightforward. One
+individual may encode all weights of a network, all weights of one hidden
+layer, or both topology and weights. Evaluating that individual means
+evaluating the entire network. This is simple, but the dimension of each
+individual can be large. It also makes the fitness function very intuitive:
+if one individual is a complete classifier or regressor, any model-level
+metric can be used as its fitness. For example, in a classification problem
+one can evaluate the individual with validation accuracy, AUC, loss, or any
+other global performance measure. The individual predicts by itself, so the
+meaning of its fitness is direct.
+
+In the proposed Michigan formulation, one individual is one hidden neuron. The
+full hidden layer is the population of surviving individuals. This reduces the
+semantic size of each individual, but creates a cooperative credit-assignment
+problem. A neuron may be valuable only when combined with other neurons. A
+neuron may also look good in isolation but be redundant with selected neurons.
+Therefore, selection cannot simply keep the individually strongest neurons.
+This was one of the first design difficulties of the thesis: the project
+needed a fitness or selection criterion that was conceptually coherent even
+though a single hidden neuron is not a complete model.
+
+This trade-off is the core idea of the project. Pittsburgh makes evaluation
+easy because the individual is complete, but each evaluation can be expensive.
+Michigan makes each individual smaller, but the population must be interpreted
+as a cooperative system. In classifier systems, the Michigan representation is
+natural because each rule can be evaluated through its contribution to the
+rule set. In this thesis, the equivalent object is a hidden neuron. A hidden
+neuron is not a classifier, but it produces a candidate feature. The population
+of features is what the output layer uses. For this reason, the problem is not
+only to evolve good neurons, but to decide what ``good'' means for a neuron
+that will only be useful as part of a selected set.
+
+This thesis adapts the Michigan idea to a single-hidden-layer MLP. The
+population is not a set of symbolic rules. It is a set of nonlinear tanh
+features. The selected population becomes the hidden layer used by the output
+solver.
+
+\subsection{Evolution Strategies}
+\label{subsec:background_es}
+
+Evolution Strategies are a family of evolutionary algorithms designed for
+continuous optimisation. They usually represent solutions as real-valued
+vectors and generate offspring by adding Gaussian perturbations. Important
+references include Schwefel~\cite{schwefel1995evolution} and the overview by
+Beyer and Schwefel~\cite{beyer2002es}.
+
+The implementation in this project uses self-adaptive mutation. Each hidden
+neuron has a genotype vector containing its input weights and bias, and a
+strategy matrix controlling how it mutates. The mutation covariance of neuron
+$i$ is
+\[
+    \boldsymbol{\Sigma}_i = \mathbf{L}_i\mathbf{L}_i^\top,
+\]
+where $\mathbf{L}_i$ is a lower-triangular matrix. The diagonal entries of
+$\mathbf{L}_i$ are mutated log-normally, while lower-triangular off-diagonal
+entries receive small Gaussian perturbations. The genotype is then updated by
+a Gaussian step shaped by $\mathbf{L}_i$.
+
+This matters because mutation is not controlled only by a fixed global
+standard deviation. The search distribution evolves together with the neuron.
+In principle, different neurons can adapt different step sizes and directions.
+
+Self-adaptation is important because the scale of useful hidden weights can
+vary across datasets and across neurons. Some neurons may need small local
+adjustments to refine a useful feature. Others may need larger moves to escape
+a poor region of the search space. A fixed mutation variance would treat all
+neurons equally. The strategy matrix gives each neuron its own mutation
+behaviour, which is consistent with the idea that individuals are independent
+hidden units.
+
+\subsection{Ridge Regression}
+\label{subsec:background_ridge}
+
+Ridge regression is a regularised least-squares method introduced by Hoerl and
+Kennard~\cite{hoerl1970ridge}. Given a design matrix
+$\mathbf{\Phi}\in\mathbb{R}^{m\times p}$ and targets
+$\mathbf{y}\in\mathbb{R}^{m}$, Ridge regression solves
+\[
+    \min_{\boldsymbol{\beta}}
+    \|\mathbf{y}-\mathbf{\Phi}\boldsymbol{\beta}\|_2^2
+    +
+    \lambda_R\|\boldsymbol{\beta}\|_2^2.
+\]
+The regularisation parameter $\lambda_R$ controls the strength of the penalty.
+When $\lambda_R$ is small, the model can fit the training data more closely.
+When it is large, the output weights are shrunk more strongly.
+
+In this thesis, Ridge regression is used for the regression-oriented version
+of the prototype. Once the hidden activations are fixed, the hidden-to-output
+weights can be obtained by a closed-form linear solve. The implementation
+uses a singular-value decomposition (SVD) for numerical stability. This is one
+of the key strengths of the Ridge/GCV path: the output layer is not trained by
+iterative gradient descent.
+
+Ridge can also be used as a least-squares classifier by encoding labels as
+$\{-1,+1\}$ and thresholding the resulting score. However, that is not the
+final classification architecture used in this thesis. For binary
+classification, the final experiments use a logistic output with
+cross-entropy, because it directly models class probabilities. For multiclass
+classification, the corresponding output layer is softmax. This separation
+keeps the modelling choice aligned with the problem: Ridge/GCV for continuous
+regression targets, logistic or softmax outputs for classification.
+
+\subsection{Generalised Cross-Validation}
+\label{subsec:background_gcv}
+
+Generalised Cross-Validation is a method for selecting regularisation
+parameters in linear smoothers~\cite{golub1979gcv}. For Ridge regression, the
+fitted values can be written as
+\[
+    \widehat{\mathbf{y}} = \mathbf{S}_{\lambda_R}\mathbf{y},
+\]
+where $\mathbf{S}_{\lambda_R}$ is the Ridge smoothing matrix. GCV estimates
+the prediction error using the residual error and the effective degrees of
+freedom of the smoother:
+\[
+    \mathrm{GCV}(\lambda_R)
+    =
+    \frac{
+    \frac{1}{m}\|\mathbf{y}-\widehat{\mathbf{y}}\|_2^2
+    }{
+    \left(1-\frac{\mathrm{tr}(\mathbf{S}_{\lambda_R})}{m}\right)^2
+    }.
+\]
+The selected $\lambda_R$ is the one minimising this criterion over a candidate
+grid.
+
+The important point is that GCV relies on the linear-smoother form of Ridge.
+It does not directly apply to logistic regression or softmax regression. Once
+the output layer is changed to a nonlinear likelihood with cross-entropy, the
+closed-form Ridge/GCV structure is lost. This is why the probabilistic
+experiments in this project do not use GCV.
+
+This distinction was an important design correction during the project. It
+would be tempting to add a logistic activation to the output neuron and keep
+the rest of the Ridge/GCV machinery unchanged. That would be conceptually
+wrong. The GCV denominator uses the effective degrees of freedom of a linear
+smoother. A logistic likelihood does not produce predictions through the same
+linear smoothing matrix. For that reason, the final method keeps the paths
+separate: Ridge/GCV for regression, and logistic/softmax for probabilistic
+classification.
+
+\subsection{Regularisation and Overfitting}
+\label{subsec:background_regularisation}
+
+Overfitting occurs when a model captures patterns that are specific to the
+training data rather than patterns that generalise. This is especially
+relevant in this project because some datasets are small and the hidden layer
+can contain many nonlinear features. A model with enough flexible features can
+fit training data well while performing worse on validation or test data.
+
+The project uses several mechanisms to reduce this risk. For regression,
+Ridge regression shrinks output weights through the $\ell_2$ penalty and GCV
+selects the regularisation strength automatically. For classification,
+validation checkpointing prevents the final reported model from being simply
+the last generation, and the probabilistic metrics reveal when the output
+becomes overconfident. L1-logistic filtering is studied as an additional
+sparsity mechanism because $\ell_1$ regularisation can remove output features
+entirely. Finally, the Michigan--Pittsburgh comparison reports the
+validation-test gap explicitly, because a method that obtains very high
+validation accuracy but substantially lower test accuracy is likely
+overfitting the validation selection process.
+
+Regularisation also has an architectural interpretation here. The ES selection
+step is a first form of structural regularisation: it keeps only $\mu$ neurons
+from a larger candidate pool. Ridge is a second form of output regularisation
+in the regression path, where it shrinks the combination of the selected
+neurons. L1-logistic filtering is a third possible stage for classification:
+it can remove selected neurons whose output coefficients are not needed. This
+layered view is useful because the model does not rely on a single mechanism
+to control complexity.
+
+\subsection{Logistic and Softmax Output Layers}
+\label{subsec:background_logistic_softmax}
+
+For binary classification, logistic regression models
+\[
+    p(y=1\mid \mathbf{x}) = \sigma(\mathbf{x}^\top\boldsymbol{\beta}),
+\]
+where $\sigma(z)=1/(1+\exp(-z))$. The output is a probability, and the usual
+loss is binary cross-entropy. For multiclass classification, softmax
+regression generalises this idea by producing one logit per class:
+\[
+    p(y=k\mid\mathbf{x})
+    =
+    \frac{\exp(z_k)}{\sum_{\ell=1}^{K}\exp(z_{\ell})}.
+\]
+The predicted class is the one with maximum probability.
+
+The logistic/softmax extension in this thesis keeps the evolved hidden
+representation but changes the output layer. The output weights are fitted by
+an unregularised logistic or softmax solver. This makes the model more natural
+for probabilistic classification, but it removes the analytical Ridge/GCV
+output solve.
+
+\subsection{Feature Selection and Credit Assignment}
+\label{subsec:background_feature_selection}
+
+The Michigan representation turns hidden-neuron survival into a feature
+selection problem. Each candidate neuron produces one activation column. The
+algorithm must select a subset of columns that is useful for prediction. This
+is why the project uses ideas from feature selection and sparse approximation.
+
+Orthogonal Matching Pursuit (OMP) is a greedy method that selects variables
+according to how much they explain the current residual~\cite{pati1993omp}.
+Correlation-based Feature Selection (CFS) selects subsets that are highly
+correlated with the target but weakly correlated with each other
+\cite{hall1999cfs}. Lasso adds another kind of selection by using an
+$\ell_1$ penalty that can set coefficients exactly to zero
+\cite{tibshirani1996lasso}.
+
+These ideas are not used as generic preprocessing. They are integrated into
+the model. OMP, $R^2$, CFS, and CFS-AUC decide which evolved neurons survive
+each generation. L1-logistic filtering is later tested as a second filter
+after the ES has already selected the hidden layer.
+
+\subsection{Evaluation Metrics}
+\label{subsec:background_metrics}
+
+The experiments use several metrics because no single number captures all
+aspects of the model. For classification, accuracy measures the fraction of
+correct predictions. ROC-AUC measures ranking quality from continuous scores
+and is independent of a fixed threshold. Because the final binary and
+multiclass classifiers are probabilistic, cross-entropy evaluates the
+predicted probabilities and Expected Calibration Error (ECE) compares
+predicted confidence with empirical correctness. A model can have high
+accuracy but poorly calibrated probabilities, so these metrics are reported
+alongside hard classification accuracy.
+
+For regression, the experiments report root mean squared error (RMSE), mean
+absolute error (MAE), and $R^2$. RMSE is sensitive to large errors, MAE is more
+directly interpretable in target units, and $R^2$ measures the proportion of
+variance explained relative to a constant predictor.
+
+\section{State of the Art}
+\label{sec:sota}
+
+This section reviews the work most relevant to the thesis. The focus is not on
+all of neural-network training, but on evolutionary training of neural
+networks and, in particular, Pittsburgh-style approaches where each individual
+encodes a complete model or a complete set of parameters.
+
+This focus is intentional. The proposed method keeps the same broad model
+family as many classical neuroevolution studies: a one-hidden-layer MLP.
+What changes is the representation of the evolutionary population. The most
+natural comparison point is therefore not a deep neural network trained with a
+modern optimiser, but a Pittsburgh-style evolutionary MLP in which each
+individual represents a complete hidden layer or complete network.
+
+\subsection{Neuroevolution}
+\label{subsec:sota_neuroevolution}
+
+Neuroevolution refers to the use of evolutionary algorithms to train neural
+networks. Yao's survey~\cite{yao1999eann} describes the main directions:
+evolving connection weights, evolving architectures, evolving learning rules,
+or combining these elements. In weight evolution, the chromosome encodes the
+parameters of a network. In topology evolution, the chromosome also controls
+the number of neurons, connections, or layers. A well-known example is NEAT,
+which evolves both topology and weights and protects innovation through
+speciation~\cite{stanley2002neat}.
+
+Most neuroevolution methods can be interpreted as Pittsburgh-style in the
+sense used in this thesis: one individual corresponds to a complete network or
+a complete candidate solution. This is a natural representation because
+fitness can be assigned directly to the individual by evaluating the network on
+the task. If the network performs well, the individual is good.
+
+The drawback is that evaluating a population can be expensive. If there are
+$N$ individuals and each individual is a network, then each generation requires
+evaluating $N$ networks. If the output layer of each network must also be
+fitted or optimised, the cost increases further. This is the main reason why
+the Michigan comparison in this thesis is meaningful.
+
+Another important point is that neuroevolution can optimise different parts of
+a neural system. Some methods evolve only connection weights. Others evolve
+topology, activation functions, or even learning rules. The present thesis is
+more restricted: it does not evolve topology, and it does not evolve the
+output-layer solver. The hidden width is fixed in each experiment. This
+restriction is intentional because it makes the comparison between
+representations cleaner. If topology, hidden width, output solver, and
+population representation all changed at the same time, it would be difficult
+to identify which design choice caused the result.
+
+The method is also smaller in scale than many modern neuroevolution systems.
+This is a limitation but also an advantage for analysis. Because the network
+has one hidden layer and the output layer is fitted analytically, the behaviour
+of the system can be inspected through activation matrices, selected neurons,
+regularisation values, and output coefficients. This makes the prototype
+suitable for a final-degree project: it is complex enough to raise real
+research questions, but compact enough to understand and evaluate carefully.
+
+\subsection{Representation as a Central Design Choice}
+\label{subsec:sota_representation_choice}
+
+In evolutionary computation, the representation of an individual is not a
+minor implementation detail. It determines the search space, the variation
+operators, and the meaning of fitness. In neural-network evolution, a common
+choice is to flatten all weights into one vector. This creates a direct
+connection between genotype and model: decode the vector, evaluate the
+network, assign fitness. The representation is simple to implement and easy
+to reason about.
+
+However, this simplicity can hide a cost. A complete neural network contains
+many parameters that interact. If an offspring changes several hidden neurons
+at once, it may be hard to know which change helped and which change hurt.
+Selection acts on the whole model. Good partial structures can be lost if the
+rest of the individual is weak, and weak partial structures can survive if
+they happen to be embedded in a good complete model. This is not necessarily a
+fatal problem, but it is one reason why representation matters.
+
+The Michigan view changes this relation. Instead of encoding a complete
+candidate solution, an individual encodes a component of the solution. In the
+original classifier-system context, that component is often a rule. In this
+thesis, the component is a hidden neuron. This makes the population itself a
+structured model. The consequence is a cooperative search problem: individuals
+must be selected not only because they are individually relevant, but because
+they help form a good population.
+
+This cooperative property is both the attraction and the difficulty of the
+proposal. It is attractive because it allows the algorithm to generate many
+small candidate building blocks and then assemble a hidden layer. It is
+difficult because the fitness of a building block is context-dependent. A
+neuron may be useful only after another neuron has captured a different
+direction in the data. Another neuron may have strong marginal correlation
+with the target but be redundant with many others. This is why the thesis
+spends substantial effort on credit assignment and selection criteria.
+
+From a state-of-the-art perspective, the project therefore sits between three
+families of ideas. It borrows the neural model from MLPs, the black-box
+continuous search mechanism from Evolution Strategies, and the
+population-as-solution idea from Michigan-style systems. The particular
+combination studied here is narrower than general neuroevolution, but it
+creates a clean question: when the model is a single-hidden-layer MLP, can the
+hidden layer be more efficiently searched as a population of neurons than as a
+population of complete hidden layers?
+
+\begin{figure}[htbp]
+\centering
+\IfFileExists{runs/illustration_pittsburgh_vs_michigan.png}{%
+\includegraphics[width=0.95\textwidth]{runs/illustration_pittsburgh_vs_michigan.png}%
+}{%
+\fbox{\begin{minipage}[c][0.33\textheight][c]{0.90\textwidth}
+\centering
+\textbf{Pending illustration: Pittsburgh vs Michigan representation}\\[0.5em]
+Place \texttt{illustration\_pittsburgh\_vs\_michigan.png} in \texttt{runs/}.
+\end{minipage}}%
+}
+\caption{Conceptual difference between Pittsburgh and Michigan evolutionary
+representations for a single-hidden-layer neural network. In Pittsburgh, each
+individual represents a complete hidden layer or full model. In the proposed
+Michigan formulation, each individual represents one hidden neuron, and the
+population itself becomes the hidden layer.}
+\label{fig:illustration_pittsburgh_vs_michigan}
+\end{figure}
+
+This illustration is placed before the detailed Pittsburgh discussion because
+the representation difference is easier to understand visually than through
+notation alone. It also prepares the reader for the final controlled
+experiment, where this conceptual difference becomes the main experimental
+variable.
+
+\subsection{Pittsburgh-Style Evolution of One-Hidden-Layer MLPs}
+\label{subsec:sota_pittsburgh_mlp}
+
+In a Pittsburgh-style evolutionary MLP, an individual typically encodes the
+weights of the whole network or at least a complete hidden layer. For a
+single-hidden-layer MLP with $H$ hidden neurons and $n$ input features, a
+hidden-layer chromosome may contain a matrix of shape
+\[
+    H \times (n+1),
+\]
+where the extra column represents the hidden biases. Evaluating the chromosome
+means computing the activations of all $H$ neurons and assessing the resulting
+model.
+
+This representation has a clear advantage: fitness assignment is simple. The
+individual is a full model. It either predicts well or it does not. It also
+fits naturally with genetic operators such as crossover and mutation. Two
+parent networks can be combined to create offspring networks, and mutations
+can perturb the whole parameter set.
+
+However, the same property can become a limitation. A complete hidden layer is
+a high-dimensional object. A small change in one neuron is evaluated only as
+part of the whole model. If a population contains many complete hidden layers,
+the algorithm must fit or evaluate many full models per generation. In this
+thesis, the controlled Pittsburgh benchmark uses the same binary logistic
+output formulation as the Michigan model. This makes the cost difference
+explicit: Pittsburgh fits an output layer for every candidate hidden layer,
+while Michigan fits it once after selecting the neuron population.
+
+This does not mean that Pittsburgh-style methods are weak. They are a natural
+choice when the objective is to evolve complete solutions, and they avoid the
+credit-assignment problem that appears in Michigan systems. In many settings,
+having a direct fitness value for each individual is a major advantage. The
+question studied here is narrower: if the final architecture is a
+single-hidden-layer MLP with a separately fitted output layer, is it necessary
+to evolve entire hidden layers as individuals, or can the population itself be
+the hidden layer? The final experiment answers this question empirically for
+the proposed prototype.
+
+The controlled Pittsburgh baseline used in the evaluation is therefore not a
+historical reproduction of a specific paper. It is an experimental comparison
+designed to isolate representation. It keeps the same tanh activation, the
+same final hidden width, the same train/validation/test split, and the same
+logistic output layer. This makes it a fair comparison for the thesis
+question, even though more advanced Pittsburgh systems could be designed.
+
+This point is important because a comparison with Pittsburgh evolution can be
+unfair in two opposite ways. If the Pittsburgh model is much weaker, the
+Michigan method may look good for reasons unrelated to representation. If the
+Pittsburgh model is given a much larger budget, the comparison no longer tests
+the original idea. The final benchmark therefore includes two Pittsburgh
+variants: one matched by the number of new hidden neurons generated per
+generation, and one with a larger population. This makes the result more
+informative. The matched version tests representation under a comparable
+neuron-generation budget. The larger version checks whether simply giving
+Pittsburgh more complete hidden layers removes the Michigan advantage.
+
+Another relevant aspect is output fitting. A Pittsburgh individual can be
+evaluated in many ways: with fixed output weights, with backpropagation, with
+least squares, or with a validation-based score after output fitting. The
+comparison in this thesis uses the same logistic output layer for both
+representations. This avoids a common ambiguity in neural-network
+comparisons. If Michigan used one output loss but Pittsburgh used another
+loss or optimiser, any performance difference could come from the output
+solver rather than the representation. Keeping the solver fixed makes the
+Pittsburgh baseline a more direct test.
+
+\subsection{GA-Based Pittsburgh Training of One-Hidden-Layer MLPs}
+\label{subsec:sota_ga_mlp}
+
+The most direct GA approach to a one-hidden-layer MLP is to encode the whole
+network, or at least the whole hidden layer, as one chromosome. Mutation
+perturbs entries of the chromosome, crossover combines parts of two parent
+networks, and selection keeps the networks with better fitness. This follows
+the standard GA view introduced in the background section, but the candidate
+solution is now a neural parameter vector.
+
+For the thesis, the important point is the unit of selection. In a GA
+Pittsburgh representation, an individual is evaluated as a complete model.
+This makes the fitness value easy to define. A chromosome either gives a good
+network after decoding, or it does not. The cost is that selection cannot
+directly know which hidden neurons inside the chromosome were responsible for
+the result. Useful partial structures may disappear if they are embedded in a
+weak network.
+
+This type of approach has more historical support than the Michigan
+formulation studied here. It is also easier to explain and implement. However,
+it does not answer the question that motivated this thesis: whether a hidden
+layer can be built from individually evolved neurons, rather than selected as
+one complete object. The final benchmark therefore uses a Pittsburgh baseline
+that preserves this complete-layer idea while sharing the same logistic
+output solver.
+
+\subsection{ES-Based Pittsburgh Training of One-Hidden-Layer MLPs}
+\label{subsec:sota_es_nn}
+
+Evolution Strategies have also been used for neural-network training. They
+optimise real-valued parameter vectors and can be scaled in different ways.
+Modern work has shown that ES can be a competitive black-box optimisation
+method in some reinforcement-learning settings~\cite{salimans2017es}. Other
+forms, such as covariance matrix adaptation, adapt the search distribution to
+the local structure of the objective.
+
+For a Pittsburgh one-hidden-layer MLP, an ES can optimise the whole hidden
+layer as a real-valued vector. Offspring are generated by perturbing that
+vector, and each offspring is evaluated as a complete hidden layer. This is a
+natural fit because neural weights and biases are continuous parameters. It
+also avoids the need to design crossover operators over network structures.
+
+The ES literature also motivates the use of mutation strategy parameters.
+Instead of treating mutation variance as a fixed external constant, an ES can
+adapt the distribution from which offspring are sampled. In the implemented
+method this idea is applied locally: every neuron carries its own mutation
+matrix. This is simpler than full covariance adaptation at the level of an
+entire neural network, but it is consistent with the Michigan interpretation.
+Each individual is responsible for both its current position in parameter
+space and the way it explores locally.
+
+The difference from the proposed method is again representational. In a
+Pittsburgh ES, the mutation strategy describes how a complete candidate
+hidden layer is perturbed. In the Michigan ES implemented in this thesis, each
+neuron carries its own strategy matrix and competes for survival as one
+component of the hidden layer. The experiments compare these views under the
+same final hidden width and output solver.
+
+This local self-adaptation is particularly appropriate for hidden neurons.
+Different neurons may play different roles in the hidden representation. Some
+may become broad, smooth features that respond to large regions of the input
+space. Others may require more local sensitivity. A single global mutation
+scale would force all neurons to explore in the same way. The implemented
+strategy matrix allows each neuron to carry a search behaviour that is tied to
+its own genotype.
+
+At the same time, the thesis does not claim to implement the most advanced
+form of ES. There is no full population-level covariance matrix and no
+topology adaptation. This is a conscious simplification. The objective is not
+to compare all ES variants, but to test whether a Michigan-style population of
+hidden neurons is useful when combined with a simple self-adaptive mutation
+mechanism and a strong output solver.
+
+\subsection{Cooperative Credit Assignment}
+\label{subsec:sota_credit_assignment}
+
+The most important algorithmic difficulty in the proposed representation is
+credit assignment. In a complete-model evolutionary algorithm, the fitness of
+an individual is the performance of that model. In a Michigan-style hidden
+layer, a neuron cannot be evaluated as a complete predictor. It only produces
+one activation column. The algorithm must decide whether this column is useful
+when combined with other columns.
+
+This connects the project to feature selection. If each hidden neuron is a
+nonlinear feature, then selecting a hidden layer is similar to selecting a
+feature subset. The difference is that the features are not fixed in advance:
+they are generated by mutation. This makes the problem dynamic. At each
+generation, the candidate pool contains surviving neurons from the previous
+generation and newly mutated neurons. The selection criterion must compare
+old and new features, maintain diversity, and avoid keeping only redundant
+high-correlation neurons.
+
+The selected credit-assignment strategies reflect different assumptions about
+credit. Marginal $R^2$ assumes that individually predictive neurons are
+valuable, with a penalty for redundancy. OMP assumes that a good neuron is one
+that explains what the current selected set has not explained yet. CFS assumes
+that a good subset balances relevance to the target and low internal
+correlation. CFS-AUC assumes that ranking quality and monotonic redundancy may
+be more appropriate for binary classification. The experiments show that this
+choice is practically important: it changes validation accuracy, test
+accuracy, AUC, and score stability.
+
+The credit-assignment discussion is also the main reason why the thesis does
+not simply call the method an Extreme Learning Machine with evolution. Random
+or fixed hidden features do not require a cooperative survival mechanism.
+Here, neuron survival is the training signal for the hidden layer. The output
+solver can only use the neurons that survive selection, so credit assignment
+is part of the model rather than an external preprocessing step.
+
+\begin{figure}[htbp]
+\centering
+\IfFileExists{runs/illustration_credit_assignment.png}{%
+\includegraphics[width=0.92\textwidth]{runs/illustration_credit_assignment.png}%
+}{%
+\fbox{\begin{minipage}[c][0.30\textheight][c]{0.88\textwidth}
+\centering
+\textbf{Pending illustration: cooperative credit assignment}\\[0.5em]
+Place \texttt{illustration\_credit\_assignment.png} in \texttt{runs/}.
+\end{minipage}}%
+}
+\caption{Credit assignment in the Michigan-style hidden layer. Candidate
+neurons produce activation columns. The selection strategy should keep neurons
+that are relevant to the target and complementary to each other, rather than
+only keeping the individually strongest or most redundant activations.}
+\label{fig:illustration_credit_assignment}
+\end{figure}
+
+The figure is intended to make the selection problem concrete. A neuron is not
+kept because it is a complete classifier, but because its activation column
+adds useful information to the selected set. This is the reason why OMP, CFS,
+$R^2$, and CFS-AUC are evaluated as different credit-assignment strategies.
+
+\subsection{Research Gap and Thesis Positioning}
+\label{subsec:sota_gap}
+
+The literature provides many examples of evolutionary neural-network training,
+but the most natural formulation is Pittsburgh-style: evolve complete
+networks, complete hidden layers, or complete parameter sets. The Michigan
+idea is common in classifier systems, but it is less common to use it as the
+representation of a neural hidden layer, where each individual is one neuron
+and the population becomes the hidden representation.
+
+This thesis positions itself in that gap. It does not attempt to propose a new
+deep-learning optimiser. It studies a specific hybrid architecture: a
+single-hidden-layer MLP in which the hidden neurons are evolved as individuals,
+the output layer is solved separately, and the main comparison point is a
+Pittsburgh-style evolutionary model using the same logistic output formulation
+for binary classification. The main
+question is whether the neuron-level representation gives practical advantages
+in performance, generalisation, or computational cost under this controlled
+setting.
+
+The gap is also methodological. Many comparisons in machine learning change
+several design choices at once. A new model may use a different optimiser, a
+different loss, a different regularisation scheme, a different hidden width,
+and a different validation protocol. Such comparisons can be useful, but they
+make it hard to isolate the reason for a performance difference. This thesis
+tries to make the final representation comparison more controlled. The
+Michigan and Pittsburgh variants share the same output solver, final hidden
+width, activation function, data splits, and validation rule. In the final
+binary comparison this shared solver is logistic cross-entropy. The remaining
+difference is how the hidden layer is represented and searched.
+
+This is why the Pittsburgh experiment is not only another baseline. It is the
+experiment that connects the implementation to the original research question.
+If Michigan had performed similarly but with a much higher cost, the
+representation would be harder to justify. If Pittsburgh had obtained much
+better test accuracy under a matched budget, the Michigan idea would be less
+convincing. The obtained result is more interesting: Michigan gives a better
+test accuracy-time trade-off in the controlled benchmark, while Pittsburgh
+achieves higher validation accuracy but a larger validation-test gap.
+
+The thesis therefore contributes mainly at the level of architecture and
+experimental evidence. It does not introduce a new evolutionary operator or a
+new theoretical result. Instead, it adapts the Michigan representation to a
+neural hidden layer, implements the required credit-assignment mechanisms, and
+tests the design against the most natural alternative: complete-layer
+Pittsburgh evolution.
+
+\section{Proposed Method}
+\label{sec:proposed_method}
+
+This section describes the final prototype.
+\subsection{Prototype Overview}
+\label{subsec:method_overview}
+
+Figure~\ref{fig:prototype_architecture} summarises the complete prototype. The
+upper row shows how candidate hidden neurons are generated and selected. The
+lower row shows how the selected hidden layer is converted into a design
+matrix and passed to an output solver. This separation is the central design
+choice of the thesis.
+
+\begin{figure}[htbp]
+\centering
+\includegraphics[width=\textwidth]{runs/prototype_architecture.png}
+\caption{Architecture of the implemented prototype. The Michigan-style ES
+evolves individual tanh neurons. Parents and offspring form a candidate pool,
+the selection strategy assigns cooperative credit and keeps $\mu$ neurons, and
+the surviving population becomes the hidden layer. The same evolved
+representation is then connected to a task-specific output layer: logistic
+cross-entropy for binary classification, Ridge/GCV for regression, and
+softmax cross-entropy for multiclass classification.}
+\label{fig:prototype_architecture}
+\end{figure}
+
+The diagram also clarifies a point that can be confusing at first. The
+evolutionary population is not a population of complete classifiers. During
+most of training, a candidate neuron has no output weight of its own and does
+not make a prediction alone. Its role is to propose one nonlinear activation
+column. The selected set of columns becomes the hidden representation, and
+only then is the output layer fitted.
+
+The method can therefore be seen as a repeated cycle:
+
+\begin{enumerate}
+    \item create new nonlinear features by mutating hidden neurons;
+    \item evaluate the candidate activation columns on the training set;
+    \item select a cooperative subset of neurons;
+    \item fit an output model on the selected representation;
+    \item use validation data to decide which generation should be kept.
+\end{enumerate}
+
+This cycle is different from both standard backpropagation and standard
+Pittsburgh neuroevolution. Backpropagation updates all weights through
+gradients of a loss. Pittsburgh evolution evaluates complete hidden layers or
+complete networks. The proposed method evolves components and assembles the
+network from the surviving components at each generation.
+
+\subsection{Design Rationale}
+\label{subsec:method_design_rationale}
+
+The method is justified from four points of view. Conceptually, the objective
+is to test whether the hidden layer can be treated as a cooperative population
+of neurons. A deep architecture would make this question harder to isolate,
+because several layers, optimiser effects, and architectural choices would
+interact. A single hidden layer keeps the representation visible: each neuron
+is one activation column, and the selected population is the hidden layer.
+
+Computationally, the design avoids fitting an output layer for every complete
+candidate network. In the Michigan version, the algorithm can generate many
+candidate neurons, select a subset, and solve the output layer once per
+generation. This is the main reason for comparing the method with a
+Pittsburgh baseline that evolves complete hidden layers under the same
+binary logistic output formulation.
+
+From the prediction point of view, the method separates nonlinear feature
+search from output fitting. Evolution searches for useful tanh features. Once
+these features are fixed, the output layer is a much simpler supervised
+problem. For binary classification this is a logistic classifier; for
+regression it is Ridge/GCV; for multiclass classification it is a softmax
+classifier. This does not make the whole training problem convex, but it keeps
+the representation search separated from the final prediction rule.
+
+Finally, the architecture gives controlled regularisation. In the regression
+path, Ridge/GCV selects the Ridge penalty automatically from the training
+design matrix. In the classification path, validation checkpointing and
+probabilistic metrics are used to control and diagnose the logistic and
+softmax models. L1-logistic filtering is used later only as an additional
+sparsity study, not as the main training mechanism. The logistic and softmax
+formulations are kept separate from Ridge/GCV because cross-entropy output
+fitting does not preserve the linear-smoother structure required by GCV.
+
+These choices explain several implementation details. The hidden activation
+is tanh because it is bounded, differentiable, and standard in small MLPs. The
+output bias is appended explicitly to the design matrix so that all
+output-layer solvers can use the same representation. Ridge/GCV is implemented
+with SVD in the regression path to avoid unstable matrix inversion.
+
+The design also reflects a practical compromise. A fully general system could
+evolve the number of neurons, choose activations, tune offspring counts, and
+select the output solver automatically. That would be more flexible, but it
+would obscure the main research question. The implemented prototype fixes
+many of those choices so that the experiments can focus on representation,
+credit assignment, and output-layer behaviour.
+
+\subsection{Model and Notation}
+\label{subsec:method_model}
+
+Let
+\[
+    \mathbf{X}\in\mathbb{R}^{m\times n}
+\]
+be the input matrix. The hidden layer contains $\mu$ tanh neurons. Each hidden
+neuron $i$ has a genotype
+\[
+    \boldsymbol{\alpha}_i =
+    [w_{i,1},\ldots,w_{i,n},b_i]^\top
+    \in\mathbb{R}^{D},
+    \qquad D=n+1.
+\]
+For a set of $P$ candidate neurons, the activation matrix is
+\[
+    \boldsymbol{\Phi}
+    =
+    \tanh(\mathbf{X}\mathbf{W}^{\top}+\mathbf{1}\mathbf{b}^{\top})
+    \in\mathbb{R}^{m\times P}.
+\]
+Each column of $\boldsymbol{\Phi}$ is the response of one candidate neuron on
+all training examples.
+
+At each generation, the algorithm forms a parent-plus-offspring pool of
+$P=\mu+\lambda_{\mathrm{ES}}$ neurons. A selection strategy chooses $\mu$
+survivors. The selected activation matrix is
+\[
+    \boldsymbol{\Phi}_{\mathrm{surv}}
+    \in\mathbb{R}^{m\times \mu}.
+\]
+The output design matrix appends a bias column:
+\[
+    \widetilde{\boldsymbol{\Phi}}
+    =
+    [\boldsymbol{\Phi}_{\mathrm{surv}}\mid \mathbf{1}]
+    \in\mathbb{R}^{m\times(\mu+1)}.
+\]
+The ES offspring count is denoted by $\lambda_{\mathrm{ES}}$ to avoid
+confusion with the Ridge regularisation parameter $\lambda_R$.
+
+\subsection{Data Pipeline}
+\label{subsec:method_data}
+
+The binary data pipeline fetches numeric OpenML datasets, checks that the
+target is binary, maps the labels to $\{0,1\}$ for logistic training, and
+performs a stratified split. If validation is enabled, the split is
+train/validation/test. Otherwise, it is train/test.
+
+Preprocessing is leak-free. Median imputation and standardisation are fitted
+only on the training split. The fitted imputer and scaler are then applied to
+validation and test data. This is important because validation is used for
+checkpoint and strategy selection, and test data must remain untouched until
+final evaluation.
+
+The order of operations is important. The split is performed before fitting
+the imputer and scaler. If standardisation were fitted on the full dataset,
+the mean and variance of the validation and test splits would influence the
+training representation. This would be a subtle form of data leakage. The
+implementation avoids this by treating preprocessing parameters as part of the
+training state.
+
+The binary loader is intentionally strict. It expects numeric OpenML features
+and exactly two classes. Categorical datasets would require an explicit
+encoding stage, which is outside the scope of the current prototype. This
+restriction keeps the experiments focused on the evolutionary neural
+architecture rather than on mixed-type tabular preprocessing.
+
+For regression, the targets remain continuous and are passed to the Ridge/GCV
+output layer. For multiclass softmax experiments, the target labels are kept
+as integer class indices and the output layer produces one probability per
+class.
+
+\subsection{Michigan ES Population}
+\label{subsec:method_population}
+
+The population state contains three main elements:
+
+\begin{itemize}
+    \item $\boldsymbol{\alpha}$: a matrix of neuron genotypes with shape
+    $\mu\times D$;
+    \item $\mathbf{L}$: a strategy matrix for each neuron, with shape
+    $\mu\times D\times D$;
+    \item $\boldsymbol{\beta}$ or $\mathbf{B}$: the fitted output weights
+    after the task-specific output layer has been trained.
+\end{itemize}
+
+The strategy matrix controls mutation. For neuron $i$, the mutation covariance
+is
+\[
+    \boldsymbol{\Sigma}_i = \mathbf{L}_i\mathbf{L}_i^\top.
+\]
+The diagonal entries of $\mathbf{L}_i$ control step sizes. They are updated
+log-normally:
+\[
+    L'_{ii}
+    =
+    \mathrm{clip}
+    \left(
+    L_{ii}\exp(\tau'\xi_0+\tau\xi_i),
+    \sigma_{\min},
+    \sigma_{\max}
+    \right),
+\]
+where $\xi_0,\xi_i\sim\mathcal{N}(0,1)$,
+\[
+    \tau = \frac{1}{\sqrt{2D}},
+    \qquad
+    \tau' = \frac{1}{\sqrt{2\sqrt{D}}}.
+\]
+The implementation uses $\sigma_{\min}=10^{-4}$ and
+$\sigma_{\max}=10.0$. The lower bound avoids mutation collapse, and the upper
+bound avoids excessively large steps that would saturate the tanh activation.
+
+The strictly lower-triangular entries receive small additive Gaussian noise:
+\[
+    L'_{ij}=L_{ij}+\beta_{\mathrm{cov}}\zeta_{ij},
+    \qquad i>j,
+    \qquad \zeta_{ij}\sim\mathcal{N}(0,1).
+\]
+Finally, the genotype is mutated as
+\[
+    \boldsymbol{\alpha}' =
+    \boldsymbol{\alpha} + \mathbf{L}'\mathbf{z},
+    \qquad \mathbf{z}\sim\mathcal{N}(\mathbf{0},\mathbf{I}).
+\]
+
+Parents are sampled with replacement when offspring are created. This means
+that a strong parent can produce several offspring in the same generation,
+while weaker parents may produce none. After offspring generation, parents
+and offspring are placed in the same candidate pool. Selection is therefore a
+$(\mu+\lambda_{\mathrm{ES}})$ survival step: the next population is chosen
+from both old and new neurons.
+
+The training procedure also keeps a small amount of elitism based on marginal
+$R^2$. After the main selection strategy has chosen the survivors, the best
+10\% of parent neurons by marginal $R^2$ can be protected if they would
+otherwise disappear. This is not the main fitness mechanism; it is a stability
+device. It reduces the risk that all useful parent neurons are lost because of
+one noisy generation, while still allowing the cooperative selection strategy
+to control most of the population.
+
+\subsection{Neuron Selection and Credit Assignment}
+\label{subsec:method_selection}
+
+After mutation, parents and offspring form a pool of candidate neurons. The
+selection step chooses the $\mu$ survivors. This is the central
+credit-assignment problem of the method. In a Pittsburgh representation this
+step would be much simpler: each individual is a complete network or complete
+hidden layer, so it can be evaluated with a standard fitness value such as
+accuracy, loss, AUC, or validation RMSE. The individual either predicts well
+or it does not. In the Michigan representation used here, one individual is
+only one hidden neuron. A single neuron produces an activation column, but it
+does not make the final prediction by itself. Therefore, the method needs a
+criterion that estimates whether a neuron is useful for the hidden layer that
+will be formed collectively.
+
+This was one of the main practical problems during the development of the
+prototype. The first natural idea was to score each neuron independently with
+the squared correlation between its activation and the target, that is a
+marginal $R^2$ criterion. This seemed reasonable because a useful hidden
+neuron should at least contain information about the target. However, the
+first trials exposed a clear weakness: many selected neurons behaved almost
+like clones. They produced very similar activation columns, were highly
+correlated with each other, and therefore predicted essentially the same
+direction in feature space. In practice, the hidden layer spent several of its
+50 positions on repeated versions of the same feature instead of covering
+complementary aspects of the data.
+
+This problem was detected by inspecting the selected activation columns and
+their pairwise correlations after training. The issue was not that the neurons
+had no relation to the target. The issue was that many of them had the same
+relation to the target. A purely marginal criterion can keep the top neurons
+according to individual relevance, but it does not ask whether the next neuron
+adds something that the already selected neurons do not contain. This is the
+central difference between feature relevance and cooperative credit
+assignment.
+
+For that reason, the selection strategies were developed chronologically as a
+sequence of increasingly cooperative criteria. The first correction was to
+keep the marginal $R^2$ idea but add a diversity penalty. Then OMP was tested
+to select neurons according to the residual information not yet explained by
+the current subset. After that, CFS was introduced because it directly
+balances target relevance and neuron-neuron redundancy at subset level.
+Finally, CFS-AUC was tested as a classification-oriented reformulation, using
+AUC for relevance and Spearman correlation for redundancy. The first
+experiment in Section~\ref{sec:experiments} compares these strategies in
+order to decide which one is the most appropriate default for the binary
+logistic architecture. The results are discussed there; here the goal is only to
+explain why each criterion was considered.
+
+The strategies are summarised below in the same conceptual order.
+
+\subsubsection{Marginal $R^2$ with diversity penalty.}
+The first criterion starts from the simplest possible idea: a neuron is useful
+if its activation is correlated with the target. Each neuron is scored by the
+squared Pearson correlation between its activation and the target:
+\[
+    R_i^2 =
+    \mathrm{Cor}(\boldsymbol{\phi}_i,\mathbf{y})^2.
+\]
+Used alone, this score favours individually predictive neurons but can select
+many redundant ones. To reduce the clone effect observed in the first
+implementation, the final version of this criterion uses greedy selection
+with a diversity penalty. The penalty discourages selecting neurons that are
+highly correlated with already selected neurons:
+\[
+    s_i^{\mathrm{eff}}
+    =
+    R_i^2
+    -
+    \gamma
+    \max_{j\in\mathcal{S}}
+    |\mathrm{Cor}(\boldsymbol{\phi}_i,\boldsymbol{\phi}_j)|.
+\]
+This strategy is fast and easy to interpret. Its limitation is that relevance
+is still mostly measured in isolation, and redundancy is only corrected by a
+penalty term.
+
+\subsubsection{OMP residual selection.}
+The next idea was to choose neurons according to what the current selected
+set still fails to explain. Orthogonal Matching Pursuit (OMP) is useful for
+this because it is a greedy sparse-approximation method. The target is
+centred, candidate activation columns are normalised, and the neuron most
+aligned with the current residual is selected. The selected direction is
+orthogonalised using a Modified Gram-Schmidt step, and the residual is
+updated. This makes later selections focus on information that the current
+subset has not yet captured.
+
+Conceptually, OMP is closer to the desired behaviour than pure marginal
+ranking. The first selected neuron may be the one most related to the target,
+but the second should not simply be a copy of the first. It should explain a
+different part of the target signal. This directly addresses the clone
+problem, although it does so through a residual least-squares view rather than
+through an explicit redundancy formula.
+
+\subsubsection{CFS selection.}
+CFS was introduced because the problem can also be viewed as feature
+selection. Each hidden neuron produces one feature column, and the selected
+hidden layer is a selected feature set. Correlation-based Feature Selection
+(CFS) treats hidden neurons as candidate features. For a subset
+$\mathcal{S}$ of size $k$, the merit is
+\[
+    \mathrm{Merit}(\mathcal{S})
+    =
+    \frac{
+    k\overline{r}_{cf}
+    }{
+    \sqrt{k+k(k-1)\overline{r}_{ff}}
+    },
+\]
+where $\overline{r}_{cf}$ is the mean squared neuron-target correlation and
+$\overline{r}_{ff}$ is the mean squared neuron-neuron correlation. The
+selection is performed greedily by adding neurons that improve this merit.
+
+This criterion matches the conceptual need of the prototype particularly well.
+It says that a good hidden layer should contain neurons that are relevant to
+the target, but not redundant with each other. In other words, it evaluates
+the quality of a subset rather than only the quality of isolated neurons.
+This is why CFS is a natural candidate for a Michigan-style hidden layer.
+
+\subsubsection{CFS-AUC.}
+CFS-AUC was the final variation considered in this sequence. The motivation
+was that the final binary classifier is logistic, and Pearson correlation is
+not the only possible relevance signal for a classification problem. A neuron
+can be valuable if its activation ranks positive examples above negative
+examples, even when the relationship is not perfectly linear. CFS-AUC keeps
+the same CFS structure but changes the statistics. Relevance is squared
+Gini-AUC:
+\[
+    r_{cf}(i) = (2\mathrm{AUC}_i-1)^2,
+\]
+and redundancy is squared Spearman correlation between activation ranks. This
+tests whether a ranking-based selection signal is more appropriate for binary
+classification. It is more expensive because it ranks every candidate
+activation.
+
+Taken together, these criteria represent the main design exploration of the
+Michigan fitness problem. Marginal $R^2$ is simple but can create redundant
+hidden layers. The diversity penalty is a first correction. OMP uses residual
+information to search for complementarity. CFS makes relevance-versus-
+redundancy the explicit objective. CFS-AUC asks whether a ranking-based
+version of the same idea is better for binary classification. The experimental
+section evaluates these alternatives before fixing the main configuration for
+the later experiments.
+
+\subsection{Binary Logistic Output Layer}
+\label{subsec:method_binary_logistic}
+
+For binary classification, the final architecture uses a logistic output
+layer. Given the selected design matrix
+$\widetilde{\boldsymbol{\Phi}}$ and labels
+$\mathbf{y}\in\{0,1\}^{m}$, the model predicts
+\[
+    p(y=1\mid\mathbf{x})
+    =
+    \sigma(
+    \widetilde{\boldsymbol{\phi}}(\mathbf{x})^\top\boldsymbol{\beta}
+    ),
+    \qquad
+    \sigma(z)=\frac{1}{1+\exp(-z)}.
+\]
+The output weights minimise binary cross-entropy:
+\[
+    \mathcal{L}_{CE}(\boldsymbol{\beta})
+    =
+    -\frac{1}{m}
+    \sum_{i=1}^{m}
+    \left[
+    y_i\log p_i + (1-y_i)\log(1-p_i)
+    \right].
+\]
+The predicted class is obtained by thresholding the probability at $0.5$.
+This is the natural binary classification path of the final prototype because
+it produces probabilities and can be evaluated with accuracy, cross-entropy,
+ROC-AUC, Brier score, and calibration error.
+
+The logistic output is unregularised in the main binary experiments. This
+choice follows the objective of keeping the output layer as simple as possible
+while testing the value of the evolved hidden representation. It also makes
+the limitation visible: when the selected representation almost separates the
+training data, the logistic output can become overconfident. This is why the
+experiments report probability-quality metrics and why a sparse L1-logistic
+variant is studied later.
+
+\subsection{Ridge/GCV Output Layer for Regression}
+\label{subsec:method_ridge}
+
+For regression, the output layer uses Ridge regression with GCV. Given the
+selected design matrix $\widetilde{\boldsymbol{\Phi}}$ and continuous targets
+$\mathbf{y}\in\mathbb{R}^{m}$, the output weights solve
+\[
+    \boldsymbol{\beta}^{*}(\lambda_R)
+    =
+    \arg\min_{\boldsymbol{\beta}}
+    \|\mathbf{y}-\widetilde{\boldsymbol{\Phi}}\boldsymbol{\beta}\|_2^2
+    +
+    \lambda_R\|\boldsymbol{\beta}\|_2^2.
+\]
+The Ridge/GCV solver computes an economy SVD
+\[
+    \widetilde{\boldsymbol{\Phi}}
+    =
+    \mathbf{U}\mathrm{diag}(\mathbf{d})\mathbf{V}^{\top}.
+\]
+For a fixed $\lambda_R$,
+\[
+    \boldsymbol{\beta}^{*}(\lambda_R)
+    =
+    \mathbf{V}
+    \mathrm{diag}
+    \left(
+    \frac{d_j}{d_j^2+\lambda_R}
+    \right)
+    \mathbf{U}^{\top}\mathbf{y}.
+\]
+The same SVD is reused to evaluate the GCV score over candidate
+$\lambda_R$ values. The fitted values are
+\[
+    \widehat{\mathbf{y}}(\lambda_R)
+    =
+    \mathbf{U}
+    \mathrm{diag}
+    \left(
+    \frac{d_j^2}{d_j^2+\lambda_R}
+    \right)
+    \mathbf{U}^{\top}\mathbf{y}.
+\]
+The effective degrees of freedom are
+\[
+    \mathrm{df}(\lambda_R)
+    =
+    \sum_j\frac{d_j^2}{d_j^2+\lambda_R},
+\]
+and the GCV criterion is
+\[
+    \mathrm{GCV}(\lambda_R)
+    =
+    \frac{
+    \frac{1}{m}\|\mathbf{y}-\widehat{\mathbf{y}}(\lambda_R)\|_2^2
+    }{
+    \left(1-\frac{\mathrm{df}(\lambda_R)}{m}\right)^2
+    }.
+\]
+The selected value minimises GCV over the candidate grid. This path is kept
+for regression because it preserves the analytical output solve and automatic
+regularisation that motivated the original prototype.
+
+\subsection{Softmax Output Layer}
+\label{subsec:method_softmax}
+
+For multiclass classification, the same selected hidden representation is
+connected to a softmax output. The output weights become a matrix
+$\mathbf{B}\in\mathbb{R}^{(\mu+1)\times K}$, where $K$ is the number of
+classes. For a sample $\mathbf{x}$,
+\[
+    \mathbf{z}
+    =
+    \widetilde{\boldsymbol{\phi}}(\mathbf{x})^\top\mathbf{B},
+    \qquad
+    p(y=k\mid\mathbf{x})
+    =
+    \frac{\exp z_k}{\sum_{\ell=1}^{K}\exp z_{\ell}}.
+\]
+The predicted class is the one with maximum probability. As in the binary
+logistic case, the output layer is trained with cross-entropy and does not use
+GCV.
+
+\subsection{Training Algorithm}
+\label{subsec:method_algorithm}
+
+The following pseudocode describes the training procedure at a high level.
+The hidden-layer search is the same across tasks; only the output layer and
+the validation metric change.
+
+\begin{algorithm}[htbp]
+\small
+\caption{Training procedure of the proposed Michigan-style ES-MLP.}
+\label{alg:training_pseudocode}
+\KwInput{Dataset $D$, task type $q$, generations $T$, population size $\mu$, offspring count $\lambda_{\mathrm{ES}}$, initial mutation scale $\sigma_0$, selection strategy $S$, random seed.}
+\KwOutput{Selected neurons $\{\boldsymbol{\alpha}_i\}_{i=1}^{\mu}$, output weights $\boldsymbol{\theta}$, validation checkpoint, final metrics.}
+
+Split $D$ into train, validation, and test partitions\;
+Fit imputation and standardisation on the training split only\;
+Transform validation and test data with the fitted preprocessing pipeline\;
+Encode targets according to $q$ \tcp*[r]{binary labels, continuous targets, or class indices}
+\For{$i=1,\ldots,\mu$}{
+    Initialise $\boldsymbol{\alpha}_i=[\mathbf{w}_i,b_i]$ uniformly\;
+    Set $\mathbf{L}_i \leftarrow \sigma_0\mathbf{I}$\;
+}
+$best \leftarrow \emptyset$\;
+\For{$t=1,\ldots,T$}{
+    Sample parent neurons with replacement\;
+    Generate $\lambda_{\mathrm{ES}}$ offspring by self-adaptive mutation\;
+    Mutate strategy matrices $\mathbf{L}$ and offspring genotypes $\boldsymbol{\alpha}$\;
+    $\mathcal{P} \leftarrow parents \cup offspring$\;
+    $\boldsymbol{\Phi}_{\mathcal{P}} \leftarrow \tanh(\mathbf{X}_{tr}\mathbf{W}_{\mathcal{P}}^{\top}+\mathbf{b}_{\mathcal{P}})$\;
+    $I_{sel} \leftarrow S(\boldsymbol{\Phi}_{\mathcal{P}}, \mathbf{y}_{tr}, \mu)$ \tcp*[r]{OMP, $R^2$, CFS, or CFS-AUC}
+    Apply the elitism safeguard for strong parent neurons\;
+    $\{\boldsymbol{\alpha}_i,\mathbf{L}_i\}_{i=1}^{\mu} \leftarrow \mathcal{P}[I_{sel}]$\;
+    $\widetilde{\boldsymbol{\Phi}}_{tr} \leftarrow [\boldsymbol{\Phi}_{\mathcal{P}}[:,I_{sel}] \mid \mathbf{1}]$\;
+    \uIf{$q$ is binary classification}{
+        Fit unregularised logistic output and obtain $\boldsymbol{\theta}=\boldsymbol{\beta}$\;
+        Evaluate accuracy, cross-entropy, ROC-AUC, Brier score, and ECE\;
+    }
+    \uElseIf{$q$ is regression}{
+        Compute one SVD of $\widetilde{\boldsymbol{\Phi}}_{tr}$\;
+        Select $\lambda_R$ by GCV and recover $\boldsymbol{\theta}=\boldsymbol{\beta}$\;
+        Evaluate RMSE, MAE, $R^2$, and GCV\;
+    }
+    \Else{
+        Fit softmax output and obtain $\boldsymbol{\theta}=\mathbf{B}$\;
+        Evaluate accuracy, macro-F1, cross-entropy, and ECE\;
+    }
+    \If{validation metric improves}{
+        $best \leftarrow (\boldsymbol{\alpha}, \mathbf{L}, \boldsymbol{\theta}, t)$\;
+    }
+    \If{the output objective stagnates over the configured window}{
+        Reset $\mathbf{L}$ for the weakest $25\%$ of surviving neurons\;
+    }
+}
+\If{$best \neq \emptyset$}{
+    Restore $(\boldsymbol{\alpha},\mathbf{L},\boldsymbol{\theta})$ from $best$\;
+}
+Evaluate the selected model once on the test split\;
+\textbf{return} selected neurons, output weights, preprocessing state, and metrics\;
+\end{algorithm}
+
+The algorithm separates the two roles of the prototype. The evolutionary part
+searches for a cooperative set of hidden neurons, while the output layer is
+fitted after each selection step with the formulation required by the task.
+The test split remains outside the loop and is only used after the validation
+checkpoint has been chosen. The mutation matrices are part of the training
+state, but they do not participate in inference.
+
+The stagnation mechanism is deliberately conservative. If the output
+objective barely improves over a window of 15 generations, the mutation
+matrices of the weakest 25\% of surviving neurons are reset to the initial
+diagonal scale. Their genotypes are not reinitialised. This means the model
+keeps the current hidden features but reopens local exploration for neurons
+that appear less useful.
+
+\subsection{Prediction Algorithm}
+\label{subsec:method_prediction}
+
+After training, the model stores the fitted preprocessing state, the selected
+hidden-neuron genotypes, and the fitted output weights. Prediction only needs
+these elements. The mutation matrices are not used during inference.
+
+\begin{algorithm}[htbp]
+\small
+\caption{Prediction procedure for the trained ES-MLP.}
+\label{alg:prediction_pseudocode}
+\KwInput{New samples $\mathbf{X}_{new}$, fitted preprocessing state, selected genotypes $\{\boldsymbol{\alpha}_j\}_{j=1}^{\mu}$, output weights $\boldsymbol{\theta}$, task type $q$.}
+\KwOutput{Predicted labels, regression values, or class probabilities.}
+
+$\mathbf{X}_{new} \leftarrow$ apply stored imputer and scaler to $\mathbf{X}_{new}$\;
+\For{$j=1,\ldots,\mu$}{
+    Extract $(\mathbf{w}_j,b_j)$ from $\boldsymbol{\alpha}_j$\;
+    $\boldsymbol{\phi}_j \leftarrow \tanh(\mathbf{X}_{new}\mathbf{w}_j+b_j)$\;
+}
+$\boldsymbol{\Phi}_{new} \leftarrow [\boldsymbol{\phi}_1,\ldots,\boldsymbol{\phi}_{\mu}]$\;
+$\widetilde{\boldsymbol{\Phi}}_{new} \leftarrow [\boldsymbol{\Phi}_{new}\mid\mathbf{1}]$\;
+\uIf{$q$ is binary classification}{
+    $\mathbf{p} \leftarrow \sigma(\widetilde{\boldsymbol{\Phi}}_{new}\boldsymbol{\beta})$\;
+    \textbf{return} probabilities $\mathbf{p}$ and labels obtained with threshold $0.5$\;
+}
+\uElseIf{$q$ is regression}{
+    $\widehat{\mathbf{y}} \leftarrow \widetilde{\boldsymbol{\Phi}}_{new}\boldsymbol{\beta}$\;
+    \textbf{return} regression values $\widehat{\mathbf{y}}$\;
+}
+\Else{
+    $\mathbf{P} \leftarrow \mathrm{softmax}(\widetilde{\boldsymbol{\Phi}}_{new}\mathbf{B})$\;
+    \textbf{return} probability rows $\mathbf{P}$ and labels $\arg\max_k P_{ik}$\;
+}
+\end{algorithm}
+
+Prediction is therefore a standard feed-forward computation. All stochastic
+search has already happened during training; inference only applies the stored
+preprocessing, evaluates the selected hidden neurons, and uses the fitted
+output layer to obtain the final response.
+
+\subsection{Relation to Backpropagation and Pittsburgh Evolution}
+\label{subsec:method_vs_backprop_pittsburgh}
+
+The proposed method is different from backpropagation because hidden neurons
+are not updated by gradients. They are created by mutation and kept or removed
+through a credit-assignment criterion. It is also different from Pittsburgh
+evolution because one individual is not a complete network, but one hidden
+neuron. The final model appears only after the selected neurons are assembled
+and the output layer is fitted.
+
+This design makes credit assignment harder than in Pittsburgh evolution, but
+it can reduce output-fitting cost because the output layer is fitted once for
+the selected population instead of once per complete candidate network.
+
+\subsection{L1-Logistic Filtering as a Second Output Filter}
+\label{subsec:method_lasso}
+
+The binary logistic output normally uses all selected hidden neurons. An
+$\ell_1$ penalty can set some output weights exactly to zero, which turns the
+output layer into a second filter after the ES selection stage. The
+L1-logistic experiment therefore tests whether the ES-selected hidden layer
+can be compressed after selection while preserving accuracy and probability
+quality.
+
+Hidden activations are standardised before the sparse output fit because
+$\ell_1$ penalties are scale-sensitive. The scaler is fitted only on training
+hidden activations and then applied to validation and test hidden activations.
+
+\subsection{Computational Cost}
+\label{subsec:method_cost}
+
+The computational difference between Michigan and Pittsburgh representations
+is central to the thesis. Let $\mu$ be the final hidden-layer width and
+$\lambda_{\mathrm{ES}}$ the number of new candidate neurons generated by the
+Michigan method. Michigan evaluates a pool of $\mu+\lambda_{\mathrm{ES}}$
+candidate neuron activations, selects $\mu$ neurons, and solves Ridge/GCV once
+per generation in the regression path. In the final binary classification
+comparison, the same idea is measured as one logistic output fit per
+generation.
+
+In a Pittsburgh method, if there are $P_{\mathrm{net}}$ parent networks and
+$O_{\mathrm{net}}$ offspring networks, each network is a complete hidden layer
+of $\mu$ neurons. Evaluating a generation requires fitting the output layer for
+$P_{\mathrm{net}}+O_{\mathrm{net}}$ complete hidden layers. Therefore, even if
+the number of newly generated hidden neurons is matched, Pittsburgh performs
+many more output-layer fits.
+
+This is not only a theoretical point. The final experiment measures it
+directly. Michigan creates 250 new neurons per generation and fits the
+logistic output once. The matched Pittsburgh variant also creates 250 new
+neurons per generation, but fits the logistic output 10 times. The larger
+Pittsburgh variant creates 600 new neurons and fits the logistic output 24
+times per generation. This explains why computational cost is a central part
+of the empirical comparison.
+
+The cost can be understood more concretely by separating three operations.
+First, candidate activations must be computed. For $m$ samples, $n$ features,
+and $P$ candidate neurons, this is roughly proportional to $m n P$. Second,
+the selection strategy must choose the survivors. For CFS, the expensive part
+is computing and using candidate-candidate correlations, which grows with the
+number of candidates. Third, the output layer must be fitted. In the binary
+classification comparison this means fitting the logistic model on the
+selected design matrix. In Michigan, this happens once per generation. In
+Pittsburgh, it happens once per candidate hidden layer. In the regression
+path, the analogous operation is the Ridge/GCV SVD solve.
+
+This decomposition clarifies why the comparison is not trivial. Michigan can
+spend more time on selection because it evaluates many individual neurons.
+Pittsburgh avoids Michigan's cooperative selection problem, but pays for many
+complete output solves. The better method depends on how these costs balance
+and on how well the selected/evolved representation generalises. The final
+experiment shows that, for the tested datasets and budgets, the Michigan
+balance is favourable.

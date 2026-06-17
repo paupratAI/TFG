@@ -55,6 +55,35 @@ def binary_log_loss_from_proba(y01: np.ndarray, proba: np.ndarray) -> float:
     return float(-np.mean(y * np.log(p) + (1.0 - y) * np.log(1.0 - p)))
 
 
+def binary_brier_score(y01: np.ndarray, proba: np.ndarray) -> float:
+    """Mean squared probability error for binary probabilities."""
+    y = np.asarray(y01, dtype=np.float64).reshape(-1)
+    p = np.asarray(proba, dtype=np.float64).reshape(-1)
+    return float(np.mean((p - y) ** 2))
+
+
+def binary_ece(y01: np.ndarray, proba: np.ndarray, n_bins: int = 10) -> float:
+    """Expected calibration error for binary probabilities."""
+    if n_bins < 1:
+        raise ValueError("n_bins must be >= 1.")
+    y = np.asarray(y01, dtype=np.float64).reshape(-1)
+    p = np.asarray(proba, dtype=np.float64).reshape(-1)
+    pred = (p >= 0.5).astype(np.float64)
+    conf = np.maximum(p, 1.0 - p)
+    correct = (pred == y).astype(np.float64)
+    edges = np.linspace(0.0, 1.0, n_bins + 1)
+    ece = 0.0
+    for lo, hi in zip(edges[:-1], edges[1:]):
+        if hi == 1.0:
+            mask = (conf >= lo) & (conf <= hi)
+        else:
+            mask = (conf >= lo) & (conf < hi)
+        if not np.any(mask):
+            continue
+        ece += float(np.mean(mask)) * abs(float(np.mean(conf[mask])) - float(np.mean(correct[mask])))
+    return float(ece)
+
+
 def predict_proba(Phi: np.ndarray, beta: np.ndarray) -> np.ndarray:
     """Return p(y=+1|X) for a binary design matrix that includes the bias column."""
     return sigmoid(np.asarray(Phi, dtype=np.float64) @ np.asarray(beta, dtype=np.float64))
