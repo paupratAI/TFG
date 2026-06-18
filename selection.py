@@ -1,7 +1,7 @@
 """
 selection.py — Neuron selection strategies for the Michigan-style ES.
 
-The central challenge in a Michigan-style ES is credit assignment:
+The central challenge in a Michigan-style ES is neuron-level fitness assignment:
 because all neurons work together to produce a single output, it is
 hard to tell which individual neurons are "good."
 
@@ -10,7 +10,7 @@ Four strategies are implemented here:
   omp_residual_selection  (default, recommended)
       Selects neurons one at a time to explain the variance in y that
       the previously selected neurons could NOT explain.  Solves the
-      cooperative credit assignment problem by evaluating each neuron
+      cooperative fitness-assignment problem by evaluating each neuron
       against the *residual*, not against y directly.
 
   r2_fitness + diversity_penalised_selection  (ablation baseline)

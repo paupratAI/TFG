@@ -66,9 +66,10 @@ model. This separates the architecture from both standard
 backpropagation and conventional Pittsburgh neuroevolution.
 
 The second conclusion is that the Michigan representation is meaningful only
-if credit assignment is handled carefully. A population of neurons is not
-automatically a good hidden layer; the selection strategy determines whether
-the algorithm keeps complementary neurons or wastes capacity on redundancy.
+if the neuron-level fitness strategy is handled carefully. A population of
+neurons is not automatically a good hidden layer; the selection strategy
+determines whether the algorithm keeps complementary neurons or wastes
+capacity on redundancy.
 
 The third conclusion is that the output layer should not be treated as a
 minor implementation detail. Ridge/GCV is very useful for regression because

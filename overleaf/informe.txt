@@ -226,6 +226,44 @@ of evolutionary computation can be found in Back~\cite{back1996evolutionary},
 and Back and Schwefel provide a classic technical overview of evolutionary
 algorithms for parameter optimisation~\cite{back1993overview}.
 
+The basic idea can be understood without assuming any previous knowledge of
+evolutionary computation. Instead of starting from one candidate solution and
+improving it with a gradient, an evolutionary algorithm starts from many
+candidate solutions at the same time. Each candidate is called an individual.
+The set of individuals is the population. At every generation, the algorithm
+evaluates the population, keeps or favours the better individuals, and creates
+new individuals by modifying existing ones. After many generations, the hope
+is that the population has moved towards better regions of the search space.
+
+A simple evolutionary cycle has five main parts. First, the algorithm chooses
+a representation, also called an encoding. This defines what an individual
+actually is. In a neural-network problem, an individual could be a complete
+network, a vector of weights, a hidden layer, or, in this thesis, one hidden
+neuron. Second, the algorithm initialises a population, often randomly. Third,
+each individual is evaluated with a fitness value. Fourth, selected
+individuals are used to create new candidates through variation operators.
+Finally, a replacement rule decides which candidates survive into the next
+generation.
+
+\begin{table}[htbp]
+\centering
+\caption{Basic terms in an evolutionary algorithm.}
+\label{tab:background_ea_terms}
+\begin{tabular}{@{}p{0.24\textwidth}p{0.67\textwidth}@{}}
+\toprule
+Term & Meaning in this thesis \\
+\midrule
+Individual & One candidate object manipulated by evolution. In Pittsburgh it is a complete network; in the proposed Michigan method it is one hidden neuron. \\
+Population & The set of individuals available at a generation. In the proposed method, the surviving population forms the hidden layer. \\
+Fitness & A numerical criterion used to decide which candidates are useful. For complete models it can be a validation metric; for neurons it requires a specialised neuron-level fitness strategy. \\
+Selection & The process that decides which individuals are kept or used as parents. \\
+Mutation & A random modification of an individual. In this thesis, mutation changes the weights and bias of a hidden neuron. \\
+Crossover & A recombination operator that mixes information from two or more parents. It is common in GAs but is not the main operator used in the implemented ES. \\
+Generation & One iteration of evaluation, variation, and replacement. \\
+\bottomrule
+\end{tabular}
+\end{table}
+
 Genetic Algorithms (GAs) are one family inside evolutionary algorithms. They
 often emphasise a chromosome-like encoding, selection, crossover, and mutation.
 The term evolutionary algorithm is broader: it also includes methods such as
@@ -234,12 +272,48 @@ this thesis, the important idea is not the exact biological metaphor, but the
 fact that a population of candidate objects is improved through repeated
 variation and selection without needing gradients.
 
+In a classical GA, the individual is usually called a chromosome. Historically,
+chromosomes were often represented as binary strings, although real-valued and
+structured encodings are also common. A chromosome is decoded into a candidate
+solution, evaluated, and assigned a fitness value. Selection then gives better
+chromosomes a higher probability of producing offspring. This does not mean
+that the best chromosome is always copied many times; if selection is too
+aggressive, the population can lose diversity too early. A useful GA must
+balance exploitation of good candidates with exploration of new regions.
+
+Two standard variation operators are mutation and crossover. Mutation changes
+part of one chromosome, for example by flipping a bit, adding noise to a
+number, or perturbing a parameter. Crossover combines two parent chromosomes
+to create one or more offspring. In a binary-string example, one part of the
+offspring may come from the first parent and the remaining part from the
+second parent. In neural networks this idea is less straightforward, because
+two networks with similar performance may not have their hidden units ordered
+in the same way. This is one reason why representation matters so much in
+neuroevolution.
+
+Elitism is another common idea. It means that a small number of the best
+individuals are preserved directly into the next generation. Without elitism,
+a good individual could disappear because of random sampling or because all
+its offspring are worse. With too much elitism, however, the algorithm may
+become conservative and stop exploring. The implemented prototype uses a
+conservative form of elitism for this reason: it protects useful neurons while
+still allowing most of the population to be decided by the selection process.
+
 Evolutionary algorithms are attractive because they can optimise
 non-differentiable, noisy, or black-box objectives. Their main drawback is the
 cost of evaluation. In neural-network training this cost can be high,
 especially if every individual represents a full network. For that reason, the
 choice of representation is not a minor implementation detail, but part of the
 research question.
+
+This last point is the bridge to the rest of the thesis. In a standard
+machine-learning model, the representation is usually the feature vector or
+the network architecture. In an evolutionary algorithm, the representation
+also defines what evolution can select and modify. If an individual is a full
+network, evolution compares complete networks. If an individual is a neuron,
+evolution compares candidate hidden features. The algorithm may therefore
+solve a different optimisation problem even if the final neural architecture
+looks similar.
 
 \subsubsection{Pittsburgh and Michigan representations}
 \label{subsec:background_pittsburgh_michigan}
@@ -644,8 +718,8 @@ generation and newly mutated neurons. The selection criterion must compare
 old and new features, maintain diversity, and avoid keeping only redundant
 high-correlation neurons.
 
-The selected credit-assignment strategies reflect different assumptions about
-credit. Marginal $R^2$ assumes that individually predictive neurons are
+The selected fitness strategies reflect different assumptions about
+what makes a neuron useful. Marginal $R^2$ assumes that individually predictive neurons are
 valuable, with a penalty for redundancy. OMP assumes that a good neuron is one
 that explains what the current selected set has not explained yet. CFS assumes
 that a good subset balances relevance to the target and low internal
@@ -658,7 +732,7 @@ The credit-assignment discussion is also the main reason why the thesis does
 not simply call the method an Extreme Learning Machine with evolution. Random
 or fixed hidden features do not require a cooperative survival mechanism.
 Here, neuron survival is the training signal for the hidden layer. The output
-solver can only use the neurons that survive selection, so credit assignment
+solver can only use the neurons that survive selection, so the fitness strategy
 is part of the model rather than an external preprocessing step.
 
 \begin{figure}[htbp]
@@ -672,7 +746,7 @@ is part of the model rather than an external preprocessing step.
 Place \texttt{illustration\_credit\_assignment.png} in \texttt{plots_overleaf/}.
 \end{minipage}}%
 }
-\caption{Credit assignment in the Michigan-style hidden layer. Candidate
+\caption{Neuron-level fitness assignment in the Michigan-style hidden layer. Candidate
 neurons produce activation columns. The selection strategy should keep neurons
 that are relevant to the target and complementary to each other, rather than
 only keeping the individually strongest or most redundant activations.}
@@ -728,7 +802,7 @@ validation accuracy but a larger validation-test gap.
 The contribution is therefore mainly architectural and empirical. It does not
 introduce a new evolutionary operator or a new theoretical result. Instead, it
 adapts the Michigan representation to a neural hidden layer, implements the
-required credit-assignment mechanisms, and tests the design against the most
+required neuron-level fitness mechanisms, and tests the design against the most
 natural alternative: full-network Pittsburgh evolution.
 
 \section{Proposed Method}
@@ -991,7 +1065,7 @@ device. It reduces the risk that all useful parent neurons are lost because of
 one noisy generation, while still allowing the cooperative selection strategy
 to control most of the population.
 
-\subsection{Neuron Selection and Credit Assignment}
+\subsection{Neuron Selection and Fitness Strategy}
 \label{subsec:method_selection}
 
 After mutation, parents and offspring form a pool of candidate neurons. The
@@ -1024,8 +1098,8 @@ had no relation to the target. The issue was that many of them had the same
 relation to the target. A purely marginal criterion can keep the top neurons
 according to individual relevance, but it does not ask whether the next neuron
 adds something that the already selected neurons do not contain. This is the
-central difference between feature relevance and cooperative credit
-assignment.
+central difference between feature relevance and a cooperative neuron-level
+fitness strategy.
 
 For that reason, the selection strategies were developed chronologically as a
 sequence of increasingly cooperative criteria. The first correction was to
@@ -1392,7 +1466,7 @@ evolution because one individual is not a complete network, but one hidden
 neuron. The final model appears only after the selected neurons are assembled
 and the output layer is fitted.
 
-This design makes credit assignment harder than in Pittsburgh evolution, but
+This design makes fitness assignment harder than in Pittsburgh evolution, but
 it can reduce output-fitting cost because the output layer is fitted once for
 the selected population instead of once per complete candidate network.
 

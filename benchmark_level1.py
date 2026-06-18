@@ -7,7 +7,7 @@ The goal of this script is to isolate the hidden-representation difference
 while keeping the logistic output solver fixed:
 
 * Michigan: each individual is one hidden neuron. The population itself is the
-  hidden layer. Credit assignment is handled by CFS neuron selection.
+  hidden layer. Neuron-level fitness is handled by CFS neuron selection.
 * Layer-level control: each individual is a complete hidden layer. A whole
   candidate layer is evaluated with the same logistic output layer.
 

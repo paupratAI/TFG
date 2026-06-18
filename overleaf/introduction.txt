@@ -82,23 +82,22 @@ explore whether an evolutionary idea could be adapted into a coherent neural
 architecture.
 
 The Pittsburgh--Michigan distinction made the project especially interesting.
-In a Pittsburgh approach, each individual is a complete model, so defining
-fitness is intuitive: the model is evaluated and its performance becomes its
+In a Pittsburgh approach, each individual is a complete model, so defining a fitness strategy is intuitive: the model is evaluated and its performance becomes its
 fitness. In the proposed Michigan approach, each individual is only one hidden
 neuron. A neuron does not predict alone, so the method must decide which
 neurons are useful because they cooperate well inside the final hidden layer.
-This is the central design challenge of the thesis and the reason why the
-selection strategy becomes as important as the mutation operator.
+This is the central design challenge of the thesis and the reason why the fitness strategy becomes as important as the mutation operator.
+So when I first considered this final-degree project, the challenge of designing a customized fitness strategy that could reliably distinguish useful neurons from noisy or dispensable ones, was a strong incentive, since it was not initially clear how such individual neurons could be evaluated effectively.
 
 The project is also motivated by the possibility of a different
 computational trade-off. Evolving complete networks can require many
 high-dimensional model evaluations. Evolving individual neurons may allow the algorithm to
 generate many small candidate features, select a cooperative subset, and fit
 the output layer only after the hidden representation has been assembled. This
-does not guarantee better performance, but it is a meaningful hypothesis to
-test. The comparison with full-network Pittsburgh evolution is therefore one
-of the most important parts of the experimental section, with a matched-budget
-layer-level control used as an additional diagnostic.
+does not guarantee better performance, but it is a meaningful hypothesis to test. 
+
+Overall, my main motivation was the reasoning that a Michigan-style architecture based on Evolution Strategies made strong conceptual sense: if hidden neurons can be treated as individually evolving components, their population could naturally form a cooperative hidden layer. I therefore wanted to test whether this idea could be implemented effectively and whether it could compete with Pittsburgh-style evolution and classical machine-learning models.
+
 
 \subsection{Objectives}
 \label{subsec:intro_objectives}
@@ -118,7 +117,7 @@ into the following sub-objectives:
     splits, confirming that the evolved hidden neurons and the output layer have
     enough capacity to model the data.
 
-    \item To define a coherent credit-assignment mechanism for the Michigan
+    \item To define a coherent neuron-level fitness strategy for the Michigan
     representation. In a Pittsburgh approach, assigning fitness is intuitive
     because each individual is a complete model. In this project, one individual
     is only one neuron, so the thesis must design a criterion that decides which
@@ -196,3 +195,46 @@ conceptual idea, implements it, identifies its weaknesses, improves the
 experimental protocol, and compares the final method against relevant
 alternatives. Negative and mixed results are kept in the discussion because
 they help define what the method can and cannot support.
+
+\subsection{Acronyms Used in the Thesis}
+\label{subsec:intro_acronyms}
+
+Before moving into the technical background, Table~\ref{tab:acronyms}
+summarises the main acronyms used throughout the thesis. The table is included
+only as a quick reference; the most important concepts are explained in more
+detail in the following sections.
+
+\begin{table}[htbp]
+\centering
+\footnotesize
+\caption{Main acronyms used throughout the thesis.}
+\label{tab:acronyms}
+\resizebox{\textwidth}{!}{%
+\begin{tabular}{@{}lll@{}}
+\toprule
+Acronym & Meaning & Context \
+\midrule
+MLP & Multilayer Perceptron & Neural model \
+NN & Neural Network & General model family \
+BP & Backpropagation & Gradient-based training \
+EA & Evolutionary Algorithm & Population-based optimisation \
+GA & Genetic Algorithm & Evolutionary computation \
+ES & Evolution Strategy & Evolutionary computation \
+CMA-ES & Covariance Matrix Adaptation Evolution Strategy & Advanced ES variant \
+NES & Natural Evolution Strategies & Advanced ES variant \
+ELM & Extreme Learning Machine & Random-feature neural model \
+CFS & Correlation-based Feature Selection & Neuron fitness strategy \
+CFS-AUC & CFS with AUC relevance & Neuron fitness strategy \
+OMP & Orthogonal Matching Pursuit & Neuron fitness strategy \
+AUC & Area Under the ROC Curve & Classification metric \
+ROC & Receiver Operating Characteristic & Classification analysis \
+GCV & Generalised Cross-Validation & Ridge output fitting \
+CE & Cross-Entropy & Classification loss \
+RMSE & Root Mean Squared Error & Regression metric \
+MAE & Mean Absolute Error & Regression metric \
+ECE & Expected Calibration Error & Probability calibration \
+SVD & Singular Value Decomposition & Ridge/GCV computation \
+\bottomrule
+\end{tabular}%
+}
+\end{table}
