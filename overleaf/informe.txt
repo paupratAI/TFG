@@ -226,85 +226,52 @@ of evolutionary computation can be found in Back~\cite{back1996evolutionary},
 and Back and Schwefel provide a classic technical overview of evolutionary
 algorithms for parameter optimisation~\cite{back1993overview}.
 
-The basic idea can be understood without assuming any previous knowledge of
-evolutionary computation. Instead of starting from one candidate solution and
-improving it with a gradient, an evolutionary algorithm starts from many
-candidate solutions at the same time. Each candidate is called an individual.
-The set of individuals is the population. At every generation, the algorithm
-evaluates the population, keeps or favours the better individuals, and creates
-new individuals by modifying existing ones. After many generations, the hope
-is that the population has moved towards better regions of the search space.
+The basic idea can be understood without assuming previous knowledge of
+evolutionary computation. Instead of improving one candidate solution with a
+gradient, an evolutionary algorithm keeps a population of candidates. At each
+generation, candidates are evaluated, better candidates are favoured, and new
+candidates are created by modifying existing ones. Over many generations, the
+population is expected to move towards better regions of the search space.
 
-A simple evolutionary cycle has five main parts. First, the algorithm chooses
-a representation, also called an encoding. This defines what an individual
-actually is. In a neural-network problem, an individual could be a complete
-network, a vector of weights, a hidden layer, or, in this thesis, one hidden
-neuron. Second, the algorithm initialises a population, often randomly. Third,
-each individual is evaluated with a fitness value. Fourth, selected
-individuals are used to create new candidates through variation operators.
-Finally, a replacement rule decides which candidates survive into the next
-generation.
+Genetic Algorithms (GAs) are one of the best-known evolutionary families. A
+GA usually works with chromosomes, applies selection according to fitness, and
+creates offspring with mutation and often crossover. The exact encoding
+depends on the problem: a chromosome can be a binary string, a vector of
+numbers, or another structured object. Table~\ref{tab:background_ea_terms}
+summarises the basic vocabulary.
 
 \begin{table}[htbp]
 \centering
-\caption{Basic terms in an evolutionary algorithm.}
+\caption{Basic terms in a Genetic Algorithm.}
 \label{tab:background_ea_terms}
 \begin{tabular}{@{}p{0.24\textwidth}p{0.67\textwidth}@{}}
 \toprule
-Term & Meaning in this thesis \\
+Term & Meaning in a GA context \\
 \midrule
-Individual & One candidate object manipulated by evolution. In Pittsburgh it is a complete network; in the proposed Michigan method it is one hidden neuron. \\
-Population & The set of individuals available at a generation. In the proposed method, the surviving population forms the hidden layer. \\
-Fitness & A numerical criterion used to decide which candidates are useful. For complete models it can be a validation metric; for neurons it requires a specialised neuron-level fitness strategy. \\
-Selection & The process that decides which individuals are kept or used as parents. \\
-Mutation & A random modification of an individual. In this thesis, mutation changes the weights and bias of a hidden neuron. \\
-Crossover & A recombination operator that mixes information from two or more parents. It is common in GAs but is not the main operator used in the implemented ES. \\
-Generation & One iteration of evaluation, variation, and replacement. \\
+Individual & One candidate solution manipulated by the algorithm. It is the object that is evaluated, selected, modified, and possibly copied into the next generation. \\
+Chromosome & The encoded form of an individual. Depending on the problem, it may be a binary string, a vector of numbers, or another structured representation. \\
+Population & The set of individuals considered at the same time. A population allows the algorithm to explore several regions of the search space in parallel. \\
+Fitness & A numerical score that measures how good an individual is for the optimisation problem. Higher fitness usually means a higher chance of survival or reproduction. \\
+Selection & The process that chooses which individuals are kept or used as parents, usually favouring individuals with better fitness. \\
+Mutation & A random modification of a chromosome. It introduces new variation and helps the population explore new candidate solutions. \\
+Crossover & A recombination operator that mixes information from two or more parent chromosomes to create offspring. \\
+Generation & One iteration of evaluation, selection, variation, and replacement. \\
 \bottomrule
 \end{tabular}
 \end{table}
 
-Genetic Algorithms (GAs) are one family inside evolutionary algorithms. They
-often emphasise a chromosome-like encoding, selection, crossover, and mutation.
-The term evolutionary algorithm is broader: it also includes methods such as
-Evolution Strategies, evolutionary programming, and genetic programming. For
-this thesis, the important idea is not the exact biological metaphor, but the
-fact that a population of candidate objects is improved through repeated
-variation and selection without needing gradients.
+The term evolutionary algorithm is broader than GA. It also includes methods
+such as Evolution Strategies, evolutionary programming, and genetic
+programming. For this thesis, the important idea is not the biological
+metaphor itself, but the fact that a population of candidate objects is
+improved through repeated variation and selection without needing gradients.
+This makes evolutionary algorithms attractive for non-differentiable, noisy,
+or black-box objectives.
 
-In a classical GA, the individual is usually called a chromosome. Historically,
-chromosomes were often represented as binary strings, although real-valued and
-structured encodings are also common. A chromosome is decoded into a candidate
-solution, evaluated, and assigned a fitness value. Selection then gives better
-chromosomes a higher probability of producing offspring. This does not mean
-that the best chromosome is always copied many times; if selection is too
-aggressive, the population can lose diversity too early. A useful GA must
-balance exploitation of good candidates with exploration of new regions.
-
-Two standard variation operators are mutation and crossover. Mutation changes
-part of one chromosome, for example by flipping a bit, adding noise to a
-number, or perturbing a parameter. Crossover combines two parent chromosomes
-to create one or more offspring. In a binary-string example, one part of the
-offspring may come from the first parent and the remaining part from the
-second parent. In neural networks this idea is less straightforward, because
-two networks with similar performance may not have their hidden units ordered
-in the same way. This is one reason why representation matters so much in
-neuroevolution.
-
-Elitism is another common idea. It means that a small number of the best
-individuals are preserved directly into the next generation. Without elitism,
-a good individual could disappear because of random sampling or because all
-its offspring are worse. With too much elitism, however, the algorithm may
-become conservative and stop exploring. The implemented prototype uses a
-conservative form of elitism for this reason: it protects useful neurons while
-still allowing most of the population to be decided by the selection process.
-
-Evolutionary algorithms are attractive because they can optimise
-non-differentiable, noisy, or black-box objectives. Their main drawback is the
-cost of evaluation. In neural-network training this cost can be high,
-especially if every individual represents a full network. For that reason, the
-choice of representation is not a minor implementation detail, but part of the
-research question.
+The main drawback is the cost of evaluation. In neural-network training this
+cost can be high, especially if every individual represents a full network.
+For that reason, the choice of representation is not a minor implementation
+detail, but part of the research question.
 
 This last point is the bridge to the rest of the thesis. In a standard
 machine-learning model, the representation is usually the feature vector or
@@ -384,6 +351,32 @@ vectors and generate offspring by adding Gaussian perturbations. Important
 references include Schwefel~\cite{schwefel1995evolution} and the overview by
 Beyer and Schwefel~\cite{beyer2002es}.
 
+Compared with a classical GA, an ES puts less emphasis on crossover and more
+emphasis on mutation in a continuous parameter space. A typical ES keeps a
+set of parent solutions, samples offspring by perturbing those parents, and
+then selects the candidates that will survive. Table~\ref{tab:background_es_terms}
+summarises the main terms used in this family of methods.
+
+\begin{table}[htbp]
+\centering
+\caption{Basic terms in an Evolution Strategy.}
+\label{tab:background_es_terms}
+\begin{tabular}{@{}p{0.24\textwidth}p{0.67\textwidth}@{}}
+\toprule
+Term & Meaning in an ES context \\
+\midrule
+Parent population & Set of candidate solutions kept from the previous generation. \\
+Offspring population & New candidate solutions generated by mutating parents. \\
+Mutation step & Random perturbation applied to a candidate solution, usually sampled from a Gaussian distribution. \\
+Strategy parameters & Parameters that control the mutation behaviour, such as step size or covariance. \\
+Self-adaptation & Mechanism where strategy parameters evolve together with the solution parameters. \\
+Selection & Rule that decides which candidates survive after parents and offspring are evaluated. \\
+$\mu$ & Number of parents or surviving individuals. \\
+$\lambda$ & Number of offspring generated per generation. \\
+\bottomrule
+\end{tabular}
+\end{table}
+
 ES fits the prototype naturally. A hidden neuron is defined by
 continuous parameters: its input weights and bias. Instead of encoding these
 parameters as binary strings or relying on crossover between full networks, an
@@ -393,12 +386,12 @@ Later ES variants, such as covariance matrix adaptation and natural evolution
 strategies, also show how adapting the search distribution can improve
 continuous black-box optimisation~\cite{hansen2001cma,wierstra2014nes}.
 
-The method follows the usual population idea. A parent population is kept, new
-offspring are generated by mutation, the parent and offspring neurons form a
-candidate pool, and a selection mechanism chooses the survivors. The difference
-with a Pittsburgh neural-network ES is that the candidate objects are not full
-networks. They are hidden neurons that later cooperate inside the same hidden
-layer.
+In the implemented prototype, these ES terms are applied at neuron level. A
+parent is a hidden neuron that survived the previous generation, an offspring
+is a mutated hidden neuron, and the selected parent population becomes the
+hidden layer of the final network. The difference with a Pittsburgh
+neural-network ES is that the candidate objects are not full networks. They
+are hidden neurons that later cooperate inside the same hidden layer.
 
 \subsubsection{Self-adaptive mutation}
 
@@ -805,31 +798,70 @@ adapts the Michigan representation to a neural hidden layer, implements the
 required neuron-level fitness mechanisms, and tests the design against the most
 natural alternative: full-network Pittsburgh evolution.
 
+\newpage
 \section{Proposed Method}
 \label{sec:proposed_method}
 
-The final prototype is described below.
 \subsection{Prototype Overview}
 \label{subsec:method_overview}
 
-Figure~\ref{fig:prototype_architecture} summarises the complete prototype. The
-upper row shows how candidate hidden neurons are generated and selected. The
-lower row shows how the selected hidden layer is converted into a design
-matrix and passed to an output solver. This separation is the central design
-choice of the thesis.
+Figure~\ref{fig:prototype_architecture} summarizes the complete prototype as a
+left-to-right processing pipeline. First, the input data are preprocessed and
+split into training, validation, and test partitions. The Michigan-style
+Evolution Strategy then generates offspring neurons through mutation and
+self-adaptation, and combines them with the parent neurons in a candidate
+pool. A credit-assignment strategy selects a cooperative subset of neurons,
+which becomes the hidden layer of the final model.
 
 \begin{figure}[htbp]
 \centering
 \includegraphics[width=\textwidth]{plots_overleaf/prototype_architecture.png}
-\caption{Architecture of the implemented prototype. The Michigan-style ES
-evolves individual tanh neurons. Parents and offspring form a candidate pool,
-the selection strategy assigns cooperative credit and keeps $\mu$ neurons, and
-the surviving population becomes the hidden layer. The same evolved
-representation is then connected to a task-specific output layer: logistic
-cross-entropy for binary classification, Ridge/GCV for regression, and
-softmax cross-entropy for multiclass classification.}
+\caption{Architecture of the implemented prototype.}
 \label{fig:prototype_architecture}
 \end{figure}
+
+Evaluating the selected hidden neurons on the input data produces the hidden
+activation matrix $\boldsymbol{\Phi}$. This shared hidden representation is
+then connected to one of three task-specific output layers. For regression,
+the model uses Ridge regression with Generalised Cross-Validation (GCV). For
+binary classification, it uses a logistic output trained with cross-entropy.
+For multiclass classification, it uses a softmax output trained with
+cross-entropy. These output branches are alternative task-dependent heads:
+they use the same selected hidden representation, but only the output layer
+appropriate to the learning task is fitted.
+
+This separation between evolutionary hidden-representation search and
+supervised output fitting is the central design choice of the thesis. The ES
+does not directly optimise the final output coefficients. Instead, it evolves
+and selects useful hidden neurons, after which the final prediction model is
+fitted on top of the resulting activation matrix.
+
+Table~\ref{tab:method_evolutionary_mapping} translates the usual evolutionary
+terms into the objects used by the proposed architecture. This mapping is
+important because the method does not follow the usual Pittsburgh
+interpretation, in which one individual represents a complete neural network.
+Instead, each individual represents one hidden neuron, and the selected
+surviving population forms the hidden layer of the final model.
+
+\begin{table}[htbp]
+\centering
+\caption{Meaning of evolutionary terms in the proposed Michigan-style ES-MLP.}
+\label{tab:method_evolutionary_mapping}
+\begin{tabular}{@{}p{0.24\textwidth}p{0.67\textwidth}@{}}
+\toprule
+Term & Meaning in this thesis \\
+\midrule
+Individual & One hidden neuron, represented by its input weights, bias, and self-adaptive mutation parameters. \\
+Population & The set of surviving hidden neurons. After selection, this population forms the hidden layer of one single MLP. \\
+Parent & A neuron that survived the previous generation and can be sampled to produce mutated offspring. \\
+Offspring & A new candidate neuron obtained by mutating a parent neuron. \\
+Candidate pool & The union of parent neurons and offspring neurons considered at one generation. \\
+Fitness strategy & The neuron-level criterion used to decide which candidate neurons should survive. It must consider both relevance to the target and complementarity with the other selected neurons. \\
+Selection & The operation that keeps $\mu$ neurons from the candidate pool. The selected neurons become the hidden layer used by the output model. \\
+Output fitting & The supervised step applied after hidden-neuron selection. Depending on the task, the selected activations are connected to a logistic, Ridge/GCV, or softmax output layer. \\
+\bottomrule
+\end{tabular}
+\end{table}
 
 The diagram also clarifies a point that can be confusing at first. The
 evolutionary population is not a population of complete classifiers. During
@@ -842,21 +874,8 @@ Figure~\ref{fig:task_specific_output_layer} isolates this second part of the
 architecture. The ES procedure always has the same role: it builds the hidden
 representation $\boldsymbol{\phi}(\mathbf{x})$ by selecting $\mu$ tanh
 neurons. What changes with the nature of the problem is the final supervised
-head. Binary classification uses a logistic output and cross-entropy,
-regression uses a Ridge output with GCV, and multiclass classification uses a
-softmax output with cross-entropy. These heads are alternatives, not
+head. These heads are alternatives, not
 simultaneous branches for the same dataset.
-
-\begin{figure}[htbp]
-\centering
-\includegraphics[width=\textwidth]{plots_overleaf/task_specific_output_layer.png}
-\caption{Task-specific output layer connected to the same evolved hidden
-representation. The Michigan-style ES selects the hidden tanh neurons, while
-the final output model is chosen according to the learning problem: logistic
-for binary classification, Ridge/GCV for regression, and softmax for
-multiclass classification.}
-\label{fig:task_specific_output_layer}
-\end{figure}
 
 At a high level, the method repeats the following cycle:
 
@@ -873,6 +892,14 @@ Pittsburgh neuroevolution. Backpropagation updates all weights through
 gradients of a loss. Pittsburgh evolution evaluates complete networks. The
 proposed method evolves components and assembles the
 network from the surviving components at each generation.
+
+\begin{figure}[htbp]
+\centering
+\includegraphics[width=\textwidth]{plots_overleaf/task_specific_output_layer.png}
+\caption{Task-specific output layer connected to the same evolved hidden
+representation. }
+\label{fig:task_specific_output_layer}
+\end{figure}
 
 \subsection{Design Rationale}
 \label{subsec:method_design_rationale}
