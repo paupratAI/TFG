@@ -538,6 +538,45 @@ def save_aggregate_score_plot(
     plt.close(fig)
 
 
+def save_aggregate_cost_plot(
+    summary: dict[str, object],
+    strategies: list[str],
+    output_path: Path,
+) -> None:
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    overall = summary["overall"]
+    labels = [r"$R^2$" if strategy == "r2" else strategy.upper().replace("_", "-") for strategy in strategies]
+    select_ms = [overall[strategy]["select_ms_mean"]["mean"] for strategy in strategies]
+    elapsed = [overall[strategy]["elapsed_seconds"]["mean"] for strategy in strategies]
+    colors = ["#8c8c8c", "#f0c08a", "#1f77b4", "#d07a24"][: len(strategies)]
+
+    fig, axes = plt.subplots(1, 2, figsize=(10.8, 4.5), constrained_layout=True)
+    x = np.arange(len(strategies))
+
+    bars = axes[0].bar(x, select_ms, color=colors, edgecolor="white")
+    axes[0].set_yscale("log")
+    axes[0].set_title("Selection cost per generation")
+    axes[0].set_ylabel("Mean selection time (ms, log scale)")
+    axes[0].set_xticks(x)
+    axes[0].set_xticklabels(labels)
+    axes[0].grid(True, axis="y", alpha=0.25, which="both")
+    for bar, value in zip(bars, select_ms):
+        axes[0].text(bar.get_x() + bar.get_width() / 2, value * 1.12, f"{value:.3f}", ha="center", fontsize=8)
+
+    bars = axes[1].bar(x, elapsed, color=colors, edgecolor="white")
+    axes[1].set_title("Total training time")
+    axes[1].set_ylabel("Mean elapsed time (s)")
+    axes[1].set_xticks(x)
+    axes[1].set_xticklabels(labels)
+    axes[1].grid(True, axis="y", alpha=0.25)
+    for bar, value in zip(bars, elapsed):
+        axes[1].text(bar.get_x() + bar.get_width() / 2, value + 0.08, f"{value:.3f}", ha="center", fontsize=8)
+
+    fig.suptitle("Computational cost of neuron-selection strategies")
+    fig.savefig(output_path, dpi=180, bbox_inches="tight")
+    plt.close(fig)
+
+
 def save_json(results: dict[str, object], output_path: Path) -> None:
     output_path.parent.mkdir(parents=True, exist_ok=True)
     with output_path.open("w", encoding="utf-8") as fh:
@@ -658,6 +697,7 @@ def main() -> None:
     diagnostics_plot_path = output_dir / "strategy_diagnostics.png"
     aggregate_accuracy_path = output_dir / "aggregate_accuracy.png"
     aggregate_score_path = output_dir / "aggregate_score_metrics.png"
+    aggregate_cost_path = output_dir / "aggregate_cost.png"
     json_path = output_dir / "strategy_comparison.json"
     all_runs_json_path = output_dir / "strategy_comparison_all_runs.json"
     summary_json_path = output_dir / "strategy_comparison_summary.json"
@@ -666,6 +706,7 @@ def main() -> None:
     save_diagnostics_plot(results, diagnostics_plot_path)
     save_aggregate_accuracy_plot(summary, list(args.strategies), aggregate_accuracy_path)
     save_aggregate_score_plot(summary, list(args.strategies), aggregate_score_path)
+    save_aggregate_cost_plot(summary, list(args.strategies), aggregate_cost_path)
     save_json(results, json_path)
     save_json(payload, all_runs_json_path)
     save_json(summary, summary_json_path)
@@ -676,6 +717,7 @@ def main() -> None:
     print(f"Saved diagnostics plot: {diagnostics_plot_path}")
     print(f"Saved aggregate accuracy plot: {aggregate_accuracy_path}")
     print(f"Saved aggregate score plot: {aggregate_score_path}")
+    print(f"Saved aggregate cost plot: {aggregate_cost_path}")
     print(f"Saved metrics: {json_path}")
     print(f"Saved all runs: {all_runs_json_path}")
     print(f"Saved aggregate summary: {summary_json_path}")

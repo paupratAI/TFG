@@ -1,14 +1,15 @@
 """
 benchmark_level1.py
 
-Fair Michigan-vs-Pittsburgh benchmark for the binary logistic architecture.
+Matched-budget layer-level control for the binary logistic architecture.
 
-The goal of this script is to isolate the representation difference:
+The goal of this script is to isolate the hidden-representation difference
+while keeping the logistic output solver fixed:
 
 * Michigan: each individual is one hidden neuron. The population itself is the
   hidden layer. Credit assignment is handled by CFS neuron selection.
-* Pittsburgh: each individual is a complete hidden layer. A whole candidate
-  network is evaluated with the same logistic output layer.
+* Layer-level control: each individual is a complete hidden layer. A whole
+  candidate layer is evaluated with the same logistic output layer.
 
 Both variants use:
 
@@ -566,23 +567,13 @@ def _architecture_configs(args: argparse.Namespace) -> list[ArchitectureConfig]:
         ),
         ArchitectureConfig(
             name="pittsburgh_matched",
-            label="Pittsburgh ES matched budget",
+            label="Layer-level matched control",
             kind="pittsburgh",
             hidden_units=args.hidden_units,
             epochs=args.epochs,
             sigma_init=args.sigma_init,
             pittsburgh_population=args.pittsburgh_matched_population,
             pittsburgh_offspring=args.pittsburgh_matched_offspring,
-        ),
-        ArchitectureConfig(
-            name="pittsburgh_strong",
-            label="Pittsburgh ES larger population",
-            kind="pittsburgh",
-            hidden_units=args.hidden_units,
-            epochs=args.epochs,
-            sigma_init=args.sigma_init,
-            pittsburgh_population=args.pittsburgh_strong_population,
-            pittsburgh_offspring=args.pittsburgh_strong_offspring,
         ),
     ]
 
@@ -782,7 +773,7 @@ def save_accuracy_plot(payload: dict[str, Any], output_dir: Path) -> None:
     fig, ax = plt.subplots(figsize=(10.5, 5.4), constrained_layout=True)
     ax.bar(x - width / 2, val_means, width, yerr=val_sem, capsize=4, label="Validation")
     ax.bar(x + width / 2, test_means, width, yerr=test_sem, capsize=4, label="Test")
-    ax.set_title("Michigan vs Pittsburgh: validation and test accuracy")
+    ax.set_title("Matched-budget layer-level control: validation and test accuracy")
     ax.set_ylabel("Accuracy")
     ax.set_xticks(x)
     ax.set_xticklabels(labels, rotation=10, ha="right")
@@ -961,7 +952,7 @@ def save_latex_notes(payload: dict[str, Any], output_dir: Path) -> None:
     lines.append("\\begin{table}[H]")
     lines.append("\\centering")
     lines.append(
-        "\\caption{Michigan--Pittsburgh comparison over Breast-W, Ionosphere, and Sonar.}"
+        "\\caption{Matched-budget layer-level control over Breast-W, Ionosphere, and Sonar.}"
     )
     lines.append("\\label{tab:exp_michigan_pittsburgh_overall}")
     lines.append("\\resizebox{\\textwidth}{!}{%")
@@ -992,7 +983,7 @@ def save_latex_notes(payload: dict[str, Any], output_dir: Path) -> None:
     lines.append("\\begin{table}[H]")
     lines.append("\\centering")
     lines.append(
-        "\\caption{Per-dataset mean test accuracy in the Michigan--Pittsburgh comparison.}"
+        "\\caption{Per-dataset mean test accuracy in the matched-budget layer-level control.}"
     )
     lines.append("\\label{tab:exp_michigan_pittsburgh_dataset}")
     lines.append("\\begin{tabular}{@{}lrrr@{}}")
@@ -1019,7 +1010,7 @@ def save_latex_notes(payload: dict[str, Any], output_dir: Path) -> None:
         "\\includegraphics[width=0.95\\textwidth]{runs/michigan_pittsburgh/michigan_pittsburgh_accuracy.png}"
     )
     lines.append(
-        "\\caption{Validation and test accuracy for the Michigan and Pittsburgh representations.}"
+        "\\caption{Validation and test accuracy for Michigan and the layer-level control.}"
     )
     lines.append("\\label{fig:exp_michigan_pittsburgh_accuracy}")
     lines.append("\\end{figure}")
@@ -1030,7 +1021,7 @@ def save_latex_notes(payload: dict[str, Any], output_dir: Path) -> None:
         "\\includegraphics[width=0.95\\textwidth]{runs/michigan_pittsburgh/michigan_pittsburgh_cost.png}"
     )
     lines.append(
-        "\\caption{Computational cost of the Michigan and Pittsburgh representations.}"
+        "\\caption{Computational cost of Michigan and the layer-level control.}"
     )
     lines.append("\\label{fig:exp_michigan_pittsburgh_cost}")
     lines.append("\\end{figure}")
@@ -1041,7 +1032,7 @@ def save_latex_notes(payload: dict[str, Any], output_dir: Path) -> None:
         "\\includegraphics[width=0.88\\textwidth]{runs/michigan_pittsburgh/michigan_pittsburgh_accuracy_time.png}"
     )
     lines.append(
-        "\\caption{Accuracy--time trade-off in the Michigan--Pittsburgh comparison.}"
+        "\\caption{Accuracy--time trade-off in the matched-budget layer-level control.}"
     )
     lines.append("\\label{fig:exp_michigan_pittsburgh_accuracy_time}")
     lines.append("\\end{figure}")
@@ -1052,7 +1043,7 @@ def save_latex_notes(payload: dict[str, Any], output_dir: Path) -> None:
 
 def print_summary(payload: dict[str, Any]) -> None:
     overall = payload["summary"]["overall"]
-    print("\n## Michigan--Pittsburgh Summary")
+    print("\n## Matched-Budget Layer-Level Control Summary")
     print(
         "| Architecture | Val Acc | Test Acc | Val-Test Gap | Test AUC | Fit s | New neurons/gen | Output fits/gen |"
     )
@@ -1073,7 +1064,7 @@ def print_summary(payload: dict[str, Any]) -> None:
 
 def build_arg_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
-        description="Fair Michigan-vs-Pittsburgh binary logistic benchmark."
+        description="Matched-budget layer-level control for the binary logistic architecture."
     )
     parser.add_argument(
         "--datasets",

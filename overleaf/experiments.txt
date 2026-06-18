@@ -1,8 +1,8 @@
 \section{Experiments}
 \label{sec:experiments}
 
-This section presents the experimental evaluation. The experiments were not
-designed as a single leaderboard. Each one answers a different question about
+The experimental evaluation is not organised as a single leaderboard. Each
+experiment answers a different question about
 the proposed architecture. The binary classification experiments use the
 logistic output architecture, because it is the natural probabilistic
 formulation for two classes. The regression experiments use the Ridge/GCV
@@ -13,19 +13,25 @@ and finally the Michigan--Pittsburgh comparison.
 \subsection{Experimental Setting}
 \label{subsec:experiments_setting}
 
-The main binary classification experiments use three OpenML datasets:
+The binary classification experiments use three OpenML datasets:
 Breast-W, Ionosphere, and Sonar. OpenML provides a common platform for sharing
 datasets and machine-learning experiments~\cite{vanschoren2013openml}. The
 three selected datasets are small tabular datasets often used as classical
-binary benchmarks. Each dataset is processed with stratified
+binary benchmarks. They also provide a useful mix for this thesis: Breast-W is
+comparatively low-dimensional and close to linearly separable, Ionosphere is a
+moderate-dimensional signal dataset with more nonlinear structure, and Sonar is
+small and higher-dimensional, which makes overfitting easier. This combination
+is appropriate for testing whether the selected hidden neurons add value beyond
+a simple linear classifier. Each dataset is processed with stratified
 train/validation/test splits, median imputation, and standardisation fitted
-only on the training split. The labels are mapped to $\{-1,+1\}$.
+only on the training split. For the logistic experiments, the labels are
+mapped to $\{0,1\}$.
 
-The main ES configuration in the binary classification experiments uses 50 hidden neurons and
-250 offspring neurons per generation, unless a specific experiment states
-otherwise. The selected checkpoint is the generation with the highest
+Unless a specific experiment states otherwise, the binary ES configuration
+uses 50 hidden neurons and 250 offspring neurons per generation. The selected
+checkpoint is the generation with the highest
 validation accuracy, with validation cross-entropy as tie-breaker. Test metrics are
-computed only after this selection. This is important because the test set is
+computed only after this selection. The test set is
 intended to simulate unseen data.
 
 The following metrics are reported:
@@ -76,14 +82,14 @@ for selection: checkpoint selection, strategy selection in some settings, and
 hyperparameter choices such as random hidden width or L1 sparsity strength. Test
 accuracy is used for final evaluation. A model with higher validation accuracy
 but lower test accuracy is not automatically better; it may be overfitting the
-validation split. This is why the Michigan--Pittsburgh experiment reports the
+validation split. The Michigan--Pittsburgh experiment therefore reports the
 validation-test gap explicitly.
 
 ROC-AUC is included because logistic and softmax outputs produce continuous
 probabilities or scores that can be ranked. Cross-entropy and Brier score
 measure probability quality, while ECE gives a simple calibration diagnostic.
 Runtime is reported as fitting time, but its interpretation differs between
-classical baselines and the evolutionary prototype. For this reason, the most
+classical baselines and the evolutionary prototype. For that reason, the most
 meaningful runtime result is the Michigan--Pittsburgh experiment, where both
 methods are evolutionary neural models and share the same output solver.
 
@@ -142,6 +148,23 @@ overall in these experiments and it is more expensive. The conclusion is that
 CFS is the most useful default strategy for the current logistic architecture,
 while CFS-AUC remains an interesting but not clearly superior variant.
 
+\begin{figure}[htbp]
+\centering
+\includegraphics[width=0.92\textwidth]{plots_overleaf/strategy_cost_summary.png}
+\caption{Computational cost of the neuron-selection strategies. The left panel reports the mean selection time per generation, using a logarithmic scale because CFS-AUC is much more expensive. The right panel reports the mean total training time.}
+\label{fig:strategy_cost_summary}
+\end{figure}
+
+The cost comparison strengthens this interpretation. Marginal $R^2$ is the
+cheapest selection rule, with a mean selection cost of about $0.513$ ms per
+generation. OMP and CFS are still inexpensive, at about $1.012$ ms and
+$1.234$ ms respectively. CFS-AUC is very different: its ranking and Spearman
+correlation computations increase the mean selection cost to about $45.000$ ms
+per generation, and the mean total training time rises from below one second
+for the other strategies to about $3.194$ s. CFS-AUC would therefore need a
+clear predictive gain to justify its cost, which is not observed in this
+experiment.
+
 The per-dataset results give more nuance. Table~\ref{tab:strategy_per_dataset}
 shows that CFS is especially strong on Ionosphere and Sonar, while CFS-AUC is
 very strong on Breast-W. This is consistent with the nature of the
@@ -182,7 +205,7 @@ On Breast-W, OMP has the highest test accuracy and AUC, while $R^2$ has the
 highest validation accuracy. On Ionosphere, CFS and $R^2$ tie in mean test
 accuracy, but CFS has much stronger AUC. On Sonar, OMP is strongest in test
 accuracy and cross-entropy, while CFS-AUC has the highest validation accuracy.
-For this reason, later experiments use validation for selection but interpret
+For that reason, later experiments use validation for selection but interpret
 test accuracy, AUC, probability metrics, and runtime together.
 
 From an architectural point of view, the result favours subset-level credit
@@ -225,7 +248,7 @@ competitive against standard tabular methods. The comparison includes:
 This experiment is important because the prototype should not be evaluated
 only against weak or artificial baselines. The results are shown in
 Table~\ref{tab:defence_baselines} and
-Figure~\ref{fig:baseline_test_accuracy}.
+Figure~\ref{fig:binary_benchmark_summary}.
 
 \begin{table}[htbp]
 \centering
@@ -251,9 +274,9 @@ Random tanh Logistic CE & $0.864\pm0.088$ & $0.857\pm0.086$ & $0.895\pm0.072$ & 
 
 \begin{figure}[htbp]
 \centering
-\includegraphics[width=0.95\textwidth]{runs/baseline_test_accuracy.png}
-\caption{Test accuracy of the logistic ES prototype against standard tabular baselines.}
-\label{fig:baseline_test_accuracy}
+\includegraphics[width=0.98\textwidth]{plots_overleaf/binary_benchmark_summary.png}
+\caption{Binary logistic benchmark summary. The left panel compares mean test accuracy and AUC, while the right panel reports the average test-accuracy rank across dataset/seed pairs.}
+\label{fig:binary_benchmark_summary}
 \end{figure}
 
 The strongest model in mean test accuracy is RBF SVM, with $0.918$. The
@@ -296,17 +319,11 @@ yes, but with limits. The deeper architectural evidence comes from the
 ablation and from the Michigan--Pittsburgh comparison, because those
 experiments isolate the effect of the evolved representation.
 
-\begin{figure}[htbp]
-\centering
-\includegraphics[width=0.90\textwidth]{runs/test_accuracy_ranking.png}
-\caption{Average test-accuracy ranking across dataset/seed pairs. Lower rank is better.}
-\label{fig:test_accuracy_ranking}
-\end{figure}
-
-The rank plot adds useful context. ES-CFS Logistic CE is not the top-ranked
-model overall, but it ranks above Random tanh Logistic CE and Gradient MLP.
-This reinforces the interpretation that the evolved hidden representation adds
-value, while the external tabular baselines remain very strong competitors.
+The ranking panel adds useful context without changing the conclusion. ES-CFS
+Logistic CE is not the top-ranked model overall, but it ranks above Random
+tanh Logistic CE and Gradient MLP. This reinforces the interpretation that
+the evolved hidden representation adds value, while the external tabular
+baselines remain very strong competitors.
 
 \subsubsection{Ablation of the Binary Logistic Architecture}
 \label{subsec:experiments_ablation}
@@ -344,7 +361,7 @@ ES-CFS Logistic CE & $\mathbf{0.920}\pm0.060$ & $\mathbf{0.881}\pm0.072$ & $\mat
 
 \begin{figure}[htbp]
 \centering
-\includegraphics[width=0.95\textwidth]{runs/logistic_ablation.png}
+\includegraphics[width=0.95\textwidth]{plots_overleaf/logistic_ablation.png}
 \caption{Ablation of the binary logistic architecture: raw input features, random tanh features, and evolved ES-CFS hidden features.}
 \label{fig:ridge_ablation}
 \end{figure}
@@ -355,7 +372,7 @@ nonlinear features are enough. The evolved ES-CFS representation obtains the
 best validation accuracy, test accuracy, and ROC-AUC among the three logistic
 variants.
 
-Therefore, the gain is not simply due to adding a hidden layer or using
+The gain is therefore not simply due to adding a hidden layer or using
 nonlinear random features. The evolutionary selection of hidden neurons is
 doing useful work.
 
@@ -373,71 +390,14 @@ unregularised logistic output may become overconfident. The ES selection step
 acts as a learned feature generator: it searches for nonlinear transformations
 that are more aligned with the target and more useful as a set.
 
-\subsubsection{Binary Probability Diagnostics}
-\label{subsec:experiments_gcv}
-
-Because the binary classifier uses a logistic output, it produces
-probabilities directly. This makes it possible to evaluate not only accuracy
-and ROC-AUC, but also probability quality. Figure~\ref{fig:lambda_sensitivity}
-compares cross-entropy, Brier score, and expected calibration error for the
-three logistic variants.
-
-\begin{figure}[htbp]
-\centering
-\includegraphics[width=0.95\textwidth]{runs/binary_probability_metrics.png}
-\caption{Probability-quality metrics for the binary logistic architecture.}
-\label{fig:lambda_sensitivity}
-\end{figure}
-
-The main observation is that the unregularised logistic output can be
-overconfident. ES-CFS Logistic CE has the strongest accuracy among the
-logistic variants, but its cross-entropy is not the best. This is consistent
-with the behaviour observed during training: several splits become linearly
-separable in the selected hidden representation, which drives the logistic
-weights towards very confident probabilities. For this reason, the thesis
-reports both hard classification metrics and probability metrics, and the
-later sparse logistic experiment is especially relevant.
-
-\subsubsection{Accuracy-Time Trade-Off}
-\label{subsec:experiments_time}
-
-The prototype is not designed to be the fastest possible classifier. The ES
-search and the CFS selection step have a cost. However, computational cost is
-still important because one of the motivations of the Michigan representation
-is to avoid evaluating many full networks.
-
-\begin{figure}[htbp]
-\centering
-\includegraphics[width=0.95\textwidth]{runs/accuracy_time_tradeoff.png}
-\caption{Accuracy and fitting-time trade-off between the logistic ES prototype and standard baselines.}
-\label{fig:accuracy_time_tradeoff}
-\end{figure}
-
-The plot shows that ES-CFS Logistic CE is slower than several classical
-baselines on these small datasets. This is expected: the evolutionary search
-dominates the runtime. The value of the prototype is therefore not that it is
-the cheapest classifier in absolute terms. Its value is that it combines
-probabilistic classification with a distinctive training structure. The final
-Michigan--Pittsburgh experiment later shows that, within the family of
-evolutionary hidden-layer searches, the Michigan representation has a
-favourable computational profile.
-
-This distinction is important for the final interpretation. Comparing the
-prototype against scikit-learn baselines answers whether the method is
-competitive as a model. Comparing Michigan against Pittsburgh answers a
-different question: whether the proposed representation is useful inside the
-evolutionary-neural design space. The latter is closer to the original
-research question of the thesis.
-
-The time plot should therefore be read with two levels in mind. At the
-application level, a practitioner who only wants the fastest accurate model on
-these small datasets might prefer RBF SVM or HistGradientBoosting. At the
-research level, the prototype is valuable because it gives a controlled way to
-study hidden-layer evolution with an analytical output layer. The cost of the
-ES search is the price paid for that representation study. The later
-Michigan--Pittsburgh result shows that, within this family of evolutionary
-hidden-layer searches, the proposed representation uses computation more
-efficiently.
+Because the output layer is logistic, the model also produces probabilities.
+That is why probability metrics are reported in the strategy and benchmark
+tables, not only accuracy and ROC-AUC. The main caution is that ES-CFS Logistic
+CE improves the hard classification metrics among the logistic variants, but it
+does not always minimise cross-entropy. This is consistent with some splits
+becoming close to linearly separable in the selected hidden representation,
+which can drive an unregularised logistic output towards very confident
+probabilities. This observation motivates the later sparse logistic experiment.
 
 \subsubsection{Regression-Oriented Ridge Benchmark}
 \label{subsec:experiments_regression}
@@ -456,6 +416,15 @@ The experiment uses three datasets:
     \item Friedman1-12000, a synthetic continuous regression dataset;
     \item Diabetes, a real continuous regression dataset from scikit-learn.
 \end{itemize}
+
+Higgs-12000 is not used here as a standard binary-classification benchmark.
+Instead, it is deliberately used as a score-regression stress test. Treating
+the original class label as a continuous $0/1$ target asks whether the
+Ridge/GCV output can learn a stable numerical score that separates the two
+classes without using a logistic loss. This is a demanding but informative way
+to test the robustness of the regression-oriented architecture, because the
+target is bounded and discrete while the model is optimised with a squared-loss
+regression objective.
 
 The compared models are Linear Ridge+GCV, Random tanh Ridge+GCV, ES-selected
 Ridge+GCV, HistGradientBoosting, and Gradient MLP. For the ES model, CFS, OMP,
@@ -495,8 +464,8 @@ Diabetes & Gradient MLP & $62.126$ & $55.973$ & $47.114$ & $0.409$ \\
 
 \begin{figure}[htbp]
 \centering
-\includegraphics[width=0.95\textwidth]{runs/regression_model_comparison.png}
-\caption{Regression benchmark test RMSE for the Ridge prototype, Ridge ablations, and external baselines.}
+\includegraphics[width=0.95\textwidth]{plots_overleaf/regression_model_comparison.png}
+\caption{Regression benchmark summary. Each dataset is first normalised by the Linear Ridge+GCV test RMSE, and the bars report the mean normalised test RMSE across the three regression datasets.}
 \label{fig:regression_model_comparison}
 \end{figure}
 
@@ -504,39 +473,34 @@ The strongest claim from this experiment is the Ridge-family ablation.
 ES-selected Ridge+GCV improves over Linear Ridge+GCV and Random tanh
 Ridge+GCV on all three datasets. On Friedman1, for example, test $R^2$
 increases from about $0.70$ for the two simpler Ridge variants to $0.83$ for
-the evolved representation. On Diabetes, ES-selected Ridge+GCV obtains the
-best test RMSE among all compared models in this run.
+the evolved representation. Figure~\ref{fig:regression_model_comparison}
+summarises this effect without letting the largest-scale dataset dominate the
+visual comparison. On Diabetes, ES-selected Ridge+GCV obtains the best test
+RMSE among all compared models in this run.
 
 \begin{figure}[htbp]
 \centering
-\includegraphics[width=0.95\textwidth]{runs/regression_ridge_value.png}
-\caption{Regression ablation showing the gain from the evolved hidden representation over linear Ridge and random tanh Ridge.}
-\label{fig:regression_ridge_value}
+\includegraphics[width=0.95\textwidth]{plots_overleaf/regression_value_summary.png}
+\caption{Regression value summary. The figure shows the test RMSE reduction obtained by ES-selected Ridge+GCV over the best simple Ridge variant.}
+\label{fig:regression_value_summary}
 \end{figure}
 
 The external baseline comparison is more mixed. HistGradientBoosting is clearly
-stronger on Higgs and Friedman1. Therefore, the prototype should not be
+stronger on Higgs and Friedman1. The prototype should therefore not be
 presented as the best general-purpose regressor. The defensible conclusion is
 more specific: the evolved hidden representation adds measurable value to the
 closed-form Ridge output model, and the same idea can be extended beyond
 classification.
 
-\begin{figure}[htbp]
-\centering
-\includegraphics[width=0.90\textwidth]{runs/higgs_predictions.png}
-\caption{Diagnostic Higgs plot: predicted numeric scores against the target for representative models.}
-\label{fig:higgs_predictions}
-\end{figure}
-
-The Higgs diagnostic plot should be read carefully. The target is binary but
-treated numerically, so the plot is not a standard continuous-regression
-scatter plot. It shows how different regressors distribute their numeric
-scores for the two target values. A useful score-regression model should
-separate the two groups while avoiding extreme unstable predictions. In this
-setting, ES-selected Ridge+GCV improves over the simpler Ridge variants, but
-HistGradientBoosting remains stronger. This reinforces the balanced
-interpretation: the evolved representation adds value, but specialised
-tabular regressors can still be better on some problems.
+The value summary is more informative than plotting individual Higgs
+predictions. Higgs is included as a score-regression stress test, but its
+target is still a numeric $0/1$ score, so a prediction scatter plot can be
+visually misleading: a good model is expected to produce an ordered score, not
+a continuous physical measurement spread over many target values. The
+percentage-gain plot focuses instead on the actual regression question: whether
+the evolved representation improves the Ridge output model under this
+stress-test formulation. It does so on all three datasets, while also making
+clear that specialised tabular regressors can still be better on some problems.
 
 \begin{table}[htbp]
 \centering
@@ -627,7 +591,7 @@ L1-screened ES-CFS Logistic CE & $\mathbf{0.926}\pm0.011$ & $0.891\pm0.016$ & $0
 
 \begin{figure}[htbp]
 \centering
-\includegraphics[width=0.95\textwidth]{runs/lasso_accuracy_sparsity.png}
+\includegraphics[width=0.95\textwidth]{plots_overleaf/lasso_accuracy_sparsity.png}
 \caption{L1-logistic output filtering after Michigan ES selection. The panels compare validation accuracy, test accuracy, and active hidden neurons.}
 \label{fig:lasso_accuracy_sparsity}
 \end{figure}
@@ -659,7 +623,7 @@ Sonar & $\mathbf{0.810}$ / $50.00$ & $0.786$ / $23.90$ & $0.779$ / $\mathbf{20.4
 
 \begin{figure}[htbp]
 \centering
-\includegraphics[width=0.90\textwidth]{runs/lasso_dataset_sparsity.png}
+\includegraphics[width=0.90\textwidth]{plots_overleaf/lasso_dataset_sparsity.png}
 \caption{Dataset-level active hidden neurons after L1-logistic filtering.}
 \label{fig:lasso_dataset_sparsity}
 \end{figure}
@@ -720,14 +684,14 @@ Spiral3-3000 & Gradient MLP & $0.988$ & $0.988$ & $0.077$ & $0.042$ \\
 
 \begin{figure}[htbp]
 \centering
-\includegraphics[width=0.95\textwidth]{runs/softmax_model_comparison.png}
-\caption{Multiclass softmax model comparison by test accuracy.}
+\includegraphics[width=0.95\textwidth]{plots_overleaf/softmax_model_comparison.png}
+\caption{Multiclass softmax summary. The bars report mean test accuracy across Digits, GaussianQuantiles-3000, and Spiral3-3000 for the three representation variants.}
 \label{fig:softmax_model_comparison}
 \end{figure}
 
 \begin{figure}[htbp]
 \centering
-\includegraphics[width=0.95\textwidth]{runs/softmax_representation_value.png}
+\includegraphics[width=0.95\textwidth]{plots_overleaf/softmax_representation_value.png}
 \caption{Softmax ablation: linear softmax, random tanh features, and evolved ES-CFS hidden features.}
 \label{fig:softmax_representation}
 \end{figure}
@@ -740,17 +704,10 @@ representation is much more important. Linear softmax is near chance on
 GaussianQuantiles and Spiral3, while ES-CFS Softmax CE reaches $0.998$ and
 $0.985$ test accuracy respectively.
 
-\begin{figure}[htbp]
-\centering
-\includegraphics[width=0.95\textwidth]{runs/softmax_probability_metrics.png}
-\caption{Probability-quality metrics for the multiclass softmax benchmark.}
-\label{fig:softmax_probability_metrics}
-\end{figure}
-
-The probability metrics are useful because they evaluate more than hard class
-accuracy. ES-CFS Softmax CE has very low cross-entropy and ECE on the two
-nonlinear synthetic datasets. On Digits, however, it does not dominate the
-probabilistic metrics. This is consistent with the architectural trade-off:
+The probability metrics in Table~\ref{tab:softmax_results} add some nuance to
+the accuracy results. ES-CFS Softmax CE has very low cross-entropy and ECE on
+the two nonlinear synthetic datasets. On Digits, however, it does not dominate
+the probabilistic metrics. This is consistent with the architectural trade-off:
 softmax is natural for probabilistic classification, but it is fitted
 iteratively rather than through the closed-form Ridge/GCV solve used in
 regression.
@@ -769,37 +726,108 @@ loses the GCV-based closed-form solve.
 
 The final experiment is the most directly connected to the original motivation
 of the thesis. It compares the proposed Michigan representation with a
-Pittsburgh-style evolutionary representation. The comparison was redesigned so
-that the difference between both approaches is as isolated as possible.
+Pittsburgh-style evolutionary representation. In this thesis, Pittsburgh is
+understood in its usual neuroevolution sense: one individual represents a
+complete neural network. For the binary task used here, a Pittsburgh
+individual encodes the input-to-hidden weights, hidden biases,
+hidden-to-output weights, and output bias of a one-hidden-layer logistic
+network. The individual is evaluated directly as a complete model.
 
-Both architectures use the same datasets, splits, preprocessing, tanh
-activation, final hidden width, logistic output layer, and validation-based
-checkpoint selection. The difference is representation:
+This comparison is intentionally demanding for the proposed method. Michigan
+does not evolve a full network. It evolves hidden neurons, selects a
+cooperative hidden layer, and then fits the output model separately. Pittsburgh
+evolves all network parameters at once. The question is therefore whether the
+separation between hidden-representation search and output fitting gives a
+better accuracy-time trade-off than evolving complete networks directly.
+
+Both architectures use the same datasets, splits, preprocessing, tanh hidden
+activation, final hidden width, and validation-based checkpoint selection. The
+main difference is what one evolutionary individual represents:
 
 \begin{itemize}
     \item Michigan ES-CFS: each individual is one hidden neuron. The population
     forms the hidden layer. The method creates 250 new candidate neurons per
     generation and fits the logistic output once per generation.
 
-    \item Pittsburgh ES matched budget: each individual is a complete hidden
-    layer. It uses 5 parent networks and 5 offspring networks. Since each
-    network has 50 hidden neurons, it creates 250 new hidden neurons per
-    generation, matching Michigan's new-neuron budget. However, it fits the
-    logistic output for 10 complete hidden layers per generation.
-
-    \item Pittsburgh ES larger population: a stronger Pittsburgh variant with
-    12 parent networks and 12 offspring networks. It creates 600 new hidden
-    neurons and fits the logistic output 24 times per generation.
+    \item Pittsburgh ES: each individual is a complete one-hidden-layer
+    network, including the output weights. The method evaluates 400 complete
+    networks per generation and does not fit a separate output layer after
+    decoding an individual.
 \end{itemize}
 
 The experiment was run on Breast-W, Ionosphere, and Sonar with five seeds
-($42$--$46$), 50 generations, and 50 hidden neurons. The same saved summaries
-are used to build the accuracy, runtime, trade-off, and convergence plots
-reported below.
+($42$--$46$), 50 generations, and 50 hidden neurons.
 
 \begin{table}[htbp]
 \centering
-\caption{Michigan--Pittsburgh comparison over Breast-W, Ionosphere, and Sonar. Values are mean $\pm$ standard error over 15 dataset/seed runs.}
+\caption{Michigan compared with full-network Pittsburgh evolution. Values are mean $\pm$ standard error over the same 15 dataset/seed runs.}
+\label{tab:full_network_pittsburgh}
+\resizebox{\textwidth}{!}{%
+\begin{tabular}{lrrrrrr}
+\toprule
+Architecture & Val Acc & Test Acc & Val--Test Gap & Test AUC & Fit s & Evaluations/gen \\
+\midrule
+Michigan ES-CFS & $0.924\pm0.014$ & $\mathbf{0.882}\pm0.022$ & $\mathbf{0.042}\pm0.012$ & $\mathbf{0.935}\pm0.014$ & $\mathbf{0.444}\pm0.036$ & $250$ neurons + $1$ output fit \\
+Pittsburgh ES & $\mathbf{0.998}\pm0.002$ & $0.818\pm0.030$ & $0.180\pm0.030$ & $0.864\pm0.028$ & $4.873\pm0.145$ & $400$ networks \\
+\bottomrule
+\end{tabular}%
+}
+\end{table}
+
+\begin{figure}[htbp]
+\centering
+\includegraphics[width=0.98\textwidth]{plots_overleaf/full_network_pittsburgh_summary.png}
+\caption{Michigan compared with Pittsburgh evolution. In the Pittsburgh baseline, one individual represents a complete one-hidden-layer neural network, including the output weights.}
+\label{fig:full_network_pittsburgh_summary}
+\end{figure}
+
+The main result is that Pittsburgh reaches almost perfect validation accuracy,
+but it does not generalise as well. Michigan ES-CFS obtains $0.882$ mean test
+accuracy and $0.935$ mean ROC-AUC. Pittsburgh obtains $0.818$ mean test
+accuracy and $0.864$ mean ROC-AUC. The validation-test gap makes the behaviour
+clearer: Michigan has an average gap of $0.042$, while Pittsburgh has a gap of
+$0.180$. Under this setup, selecting complete evolved networks produces very
+optimistic validation performance, but that performance transfers less well to
+the test set.
+
+The computational result points in the same direction. Pittsburgh evaluates
+400 complete networks per generation, and each individual contains all hidden
+and output parameters. Michigan searches only over hidden neurons and fits the
+output layer once after selecting the hidden representation. The mean training
+time is therefore much lower for Michigan: $0.444$ s compared with $4.873$ s.
+The accuracy-time panel in Figure~\ref{fig:full_network_pittsburgh_summary}
+summarises the result: for these datasets and budgets, Michigan is both more
+accurate on test data and substantially cheaper to train.
+
+This does not prove that every Michigan method is better than every Pittsburgh
+method. The datasets are small binary tabular datasets, and a different
+Pittsburgh implementation could behave differently. However, this experiment
+does address the central question of the thesis directly: when Pittsburgh is
+implemented as full-network evolution, the proposed Michigan representation
+offers a better generalisation-cost balance in the tested setting.
+
+\paragraph{Matched-budget layer-level control.}
+The full-network comparison is conceptually the most faithful Pittsburgh
+baseline, but it changes the output training mechanism: Pittsburgh evolves the
+output weights, while Michigan fits them after selecting the hidden layer. For
+that reason, a secondary control experiment was also included. In this control,
+the competing evolutionary object is a complete hidden layer, not a complete
+network. Each candidate hidden layer is evaluated with the same logistic
+output fitting procedure used by Michigan. This is not the default meaning of
+Pittsburgh in the thesis, but it is useful because it isolates the hidden-layer
+representation while keeping the output solver fixed.
+
+The control is matched by the number of newly generated hidden neurons.
+Michigan creates 250 new candidate neurons per generation. The layer-level
+control uses 5 parent hidden layers and 5 offspring hidden layers; since each
+layer has 50 neurons, it also creates 250 new hidden neurons per generation.
+The difference is that the control must fit the logistic output for 10
+complete hidden layers per generation, whereas Michigan fits it once after
+selecting its neuron population.
+
+\begin{table}[htbp]
+\centering
+\caption{Matched-budget layer-level control. Values are mean $\pm$ standard error over 15 dataset/seed runs.}
 \label{tab:michigan_pittsburgh_overall}
 \resizebox{\textwidth}{!}{%
 \begin{tabular}{lrrrrrrr}
@@ -807,8 +835,7 @@ reported below.
 Architecture & Val Acc & Test Acc & Val--Test Gap & Test AUC & Fit s & New neurons/gen & Output fits/gen \\
 \midrule
 Michigan ES-CFS & $0.924\pm0.014$ & $\mathbf{0.882}\pm0.022$ & $\mathbf{0.042}\pm0.012$ & $\mathbf{0.935}\pm0.014$ & $\mathbf{0.444}\pm0.036$ & $250$ & $\mathbf{1.0}$ \\
-Pittsburgh ES matched budget & $0.941\pm0.010$ & $0.816\pm0.032$ & $0.125\pm0.025$ & $0.840\pm0.030$ & $1.474\pm0.036$ & $250$ & $10.0$ \\
-Pittsburgh ES larger population & $\mathbf{0.946}\pm0.010$ & $0.842\pm0.027$ & $0.104\pm0.019$ & $0.880\pm0.020$ & $3.574\pm0.087$ & $600$ & $24.0$ \\
+Layer-level matched control & $\mathbf{0.941}\pm0.010$ & $0.816\pm0.032$ & $0.125\pm0.025$ & $0.840\pm0.030$ & $1.474\pm0.036$ & $250$ & $10.0$ \\
 \bottomrule
 \end{tabular}%
 }
@@ -816,111 +843,43 @@ Pittsburgh ES larger population & $\mathbf{0.946}\pm0.010$ & $0.842\pm0.027$ & $
 
 \begin{figure}[htbp]
 \centering
-\includegraphics[width=0.95\textwidth]{runs/michigan_pittsburgh_accuracy.png}
-\caption{Validation and test accuracy for the Michigan and Pittsburgh representations.}
-\label{fig:michigan_pittsburgh_accuracy}
+\includegraphics[width=0.98\textwidth]{plots_overleaf/michigan_pittsburgh_summary.png}
+\caption{Matched-budget layer-level control. The competing evolutionary object is a full hidden layer evaluated with the same logistic output solver, while Michigan evolves individual neurons.}
+\label{fig:michigan_pittsburgh_summary}
 \end{figure}
-
-The most important result is that Pittsburgh achieves higher validation
-accuracy but worse test accuracy. Michigan ES-CFS obtains $0.882$ mean test
-accuracy and $0.935$ mean ROC-AUC. The matched Pittsburgh variant obtains
-$0.816$ test accuracy and $0.840$ ROC-AUC. The larger Pittsburgh variant
-improves to $0.842$ test accuracy, but remains below Michigan.
-
-The validation-test gap explains the difference. Michigan has an average gap
-of $0.042$, while the Pittsburgh variants have gaps of $0.125$ and
-$0.104$. This suggests that the complete-layer representation is more prone
-to validation overfitting under this setting. Each Pittsburgh individual is a
-high-dimensional complete model, and selecting the best complete model from
-many candidates can produce optimistic validation performance that does not
-transfer as well to test data.
 
 \begin{table}[htbp]
 \centering
-\caption{Per-dataset mean test accuracy in the Michigan--Pittsburgh comparison.}
+\caption{Per-dataset mean test accuracy in the matched-budget layer-level control.}
 \label{tab:michigan_pittsburgh_dataset}
 \resizebox{\textwidth}{!}{%
-\begin{tabular}{lrrr}
+\begin{tabular}{lrr}
 \toprule
-Dataset & Michigan ES-CFS & Pittsburgh ES matched budget & Pittsburgh ES larger population \\
+Dataset & Michigan ES-CFS & Layer-level matched control \\
 \midrule
-Breast-W & $\mathbf{0.954}\pm0.007$ & $0.949\pm0.007$ & $0.950\pm0.009$ \\
-Ionosphere & $\mathbf{0.915}\pm0.017$ & $0.834\pm0.012$ & $0.862\pm0.023$ \\
-Sonar & $\mathbf{0.776}\pm0.019$ & $0.667\pm0.030$ & $0.714\pm0.018$ \\
+Breast-W & $\mathbf{0.954}\pm0.007$ & $0.949\pm0.007$ \\
+Ionosphere & $\mathbf{0.915}\pm0.017$ & $0.834\pm0.012$ \\
+Sonar & $\mathbf{0.776}\pm0.019$ & $0.667\pm0.030$ \\
 \bottomrule
 \end{tabular}%
 }
 \end{table}
 
-\begin{figure}[htbp]
-\centering
-\includegraphics[width=0.95\textwidth]{runs/michigan_pittsburgh_dataset_accuracy.png}
-\caption{Per-dataset test accuracy for the Michigan and Pittsburgh representations.}
-\label{fig:michigan_pittsburgh_dataset_accuracy}
-\end{figure}
+The control points in the same direction as the full-network comparison. The
+layer-level control obtains higher validation accuracy than Michigan, but a
+lower test accuracy and a larger validation-test gap. The cost is also higher:
+even with the same new-neuron budget, the control fits the output layer 10
+times per generation. This supports the interpretation that the Michigan
+representation is not only cheaper because its individuals are smaller; it is
+also useful because it can assemble one cooperative hidden layer from many
+candidate neurons before fitting the output model.
 
-On Breast-W, all methods perform well and the larger Pittsburgh population has
-the highest mean test accuracy. This dataset is relatively easy for the tested
-models. The difference appears on Ionosphere and Sonar. Michigan is clearly
-better on Ionosphere, and the gap is even larger on Sonar, which is small and
-high-dimensional. This supports the idea that neuron-level evolution can be
-more robust when the data are limited and a complete hidden layer is a large
-object to optimise at once.
-
-\begin{figure}[htbp]
-\centering
-\includegraphics[width=0.95\textwidth]{runs/michigan_pittsburgh_cost.png}
-\caption{Computational cost of the Michigan and Pittsburgh representations.}
-\label{fig:michigan_pittsburgh_cost}
-\end{figure}
-
-The cost plot gives the experiment much of its value. The matched Pittsburgh
-variant creates the same number of new hidden neurons per generation as
-Michigan, but it is more than three times slower on average because it
-evaluates 10 complete hidden layers and fits the logistic output 10 times per
-generation. Michigan fits the logistic output only once after selecting the
-neuron population. The larger Pittsburgh variant is around eight times slower
-than Michigan and fits the output 24 times per generation. Increasing the
-Pittsburgh budget improves test accuracy only partially, while increasing
-cost substantially.
-
-\begin{figure}[htbp]
-\centering
-\includegraphics[width=0.88\textwidth]{runs/michigan_pittsburgh_accuracy_time.png}
-\caption{Accuracy-time trade-off in the Michigan--Pittsburgh comparison.}
-\label{fig:michigan_pittsburgh_accuracy_time}
-\end{figure}
-
-\begin{figure}[htbp]
-\centering
-\includegraphics[width=0.95\textwidth]{runs/michigan_pittsburgh_convergence.png}
-\caption{Validation accuracy during evolution for Michigan and Pittsburgh.}
-\label{fig:michigan_pittsburgh_convergence}
-\end{figure}
-
-The accuracy-time plot summarises the result: Michigan is in the favourable
-region, with higher test accuracy and lower training time. The convergence
-plot shows that Pittsburgh can improve validation accuracy during evolution,
-but this does not translate into better test performance.
-
-One useful way to interpret this result is to compare what a "candidate" means
-in each representation. In Michigan, a candidate is a neuron. The algorithm
-can generate many candidate neurons and then build one hidden layer from the
-selected set. In Pittsburgh, a candidate is already a complete hidden layer.
-This gives each Pittsburgh individual a direct validation score, but it also
-makes each evaluation heavier and each individual higher-dimensional. The
-larger Pittsburgh run shows the cost of trying to compensate with more search:
-validation accuracy improves, but test accuracy and runtime do not justify the
-extra budget in this experiment.
-
-This does not prove that every Michigan representation is better than every
-Pittsburgh representation. The datasets are small binary tabular datasets, and
-a different Pittsburgh implementation could behave differently. However, under
-a controlled setting where the output solver, activation function, hidden
-width, validation protocol, and data splits are shared, the Michigan
-representation obtains a better accuracy-time trade-off and a smaller
-generalisation gap. This directly supports the original hypothesis of the
-thesis.
+Together, the two comparisons are useful for different reasons. The main
+Pittsburgh experiment uses the standard complete-network interpretation and is
+therefore the most conceptually important result. The matched-budget
+layer-level control removes one possible confounding factor by sharing the
+output solver. Both results favour the proposed Michigan representation under
+the tested setting.
 
 \subsubsection{Overall Experimental Discussion}
 \label{subsec:experiments_overall}
@@ -932,14 +891,15 @@ representation adds value beyond linear and random-feature logistic models,
 even though classical tabular baselines remain very strong. The regression
 benchmark keeps the Ridge/GCV architecture where it is most natural, while
 the L1-logistic and softmax experiments broaden the probabilistic
-classification evidence. Finally, the Michigan--Pittsburgh comparison
-addresses the original motivation directly.
+classification evidence. The full-network Michigan--Pittsburgh comparison,
+supported by the matched-budget layer-level control, addresses the original
+motivation directly.
 
 The most specific evidence comes from the logistic ablation, the regression
 Ridge ablation, and the Michigan--Pittsburgh comparison. The ablations isolate
 the value of evolving the hidden representation; the final comparison
-isolates the value of using a Michigan representation instead of complete
-hidden-layer evolution. The extension experiments add breadth, but they are
+tests the value of using a Michigan representation instead of full-network
+evolution. The extension experiments add breadth, but they are
 not treated as universal proof of superiority.
 
 \subsubsection{Threats to Validity}
@@ -948,13 +908,16 @@ not treated as universal proof of superiority.
 The main threats to validity are dataset scale, seed sensitivity, and the
 limited scope of the Pittsburgh baseline. The binary experiments use only
 three small tabular datasets, and several experiments would benefit from more
-seeds. The Pittsburgh comparison is designed to isolate representation,
-not to cover every possible Pittsburgh neuroevolution method.
+seeds. The Pittsburgh comparison uses one concrete full-network ES baseline,
+not every possible Pittsburgh neuroevolution method. The matched-budget
+layer-level control is useful for isolating representation, but it should be
+interpreted as an auxiliary diagnostic rather than as the default Pittsburgh
+formulation.
 
 Another limitation is that the ES hyperparameters were chosen for a practical
-prototype rather than exhaustively optimised. Finally, the logistic and
+prototype rather than exhaustively optimised. The logistic and
 softmax classifiers should not be merged with the Ridge/GCV regression
 results into a single claim: they represent related but different output-layer
 formulations. These limitations bound the conclusions, but they do not remove
 the main result that the Michigan-style representation is coherent and
-favourable in the controlled comparison tested here.
+favourable in the comparisons tested here.

@@ -26,6 +26,8 @@
 \usepackage[nottoc,numbib]{tocbibind}
 \usepackage[hidelinks]{hyperref}
 
+\graphicspath{{./}{../}}
+
 \SetKwInput{KwInput}{Input}
 \SetKwInput{KwOutput}{Output}
 \DontPrintSemicolon
@@ -37,39 +39,26 @@
 
 \begin{document}
 
-\IfFileExists{portada.pdf}{%
 \includepdf[pages={1}]{portada.pdf}
 \setcounter{page}{2}
-}{%
-\begin{titlepage}
-\centering
-\vspace*{3cm}
-{\Large Bachelor's Thesis\par}
-\vspace{1.5cm}
-{\huge\bfseries Training neural networks with Evolution Strategies\par}
-\vfill
-{\large Pau Prat Moreno\par}
-\end{titlepage}
-\setcounter{page}{2}
-}
 
 % --- CONFIGURACIÓN DEL ENCABEZADO ---
 \fancyhf{} % Limpia encabezados y pies de página anteriores
-\rhead{\IfFileExists{Logos UPC/Logo UPC BCNTech Negre Transparent.png}{\includegraphics[height=1.2cm]{Logos UPC/Logo UPC BCNTech Negre Transparent.png}}{}}
+\rhead{\includegraphics[height=1.2cm]{Logos UPC/Logo UPC BCNTech Negre Transparent.png}}
 \lhead{\small\textbf{Training neural networks with Evolution Strategies}\vspace{5pt}}
 \cfoot{\thepage} % Añade el número de página al centro del pie de página
 \pagestyle{fancy}
 % -------------------------------------------------------------------
 
-\input{abstract.txt}
+\include{abstract}
 
 \clearpage
 \tableofcontents
 
 \clearpage
-\input{introduction.txt}
-\input{informe.txt}
-\input{experiments.txt}
-\input{conclusions.txt}
+\include{introduction}
+\include{informe}
+\include{experiments}
+\include{conclusions}
 
 \end{document}

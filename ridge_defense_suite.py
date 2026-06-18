@@ -616,30 +616,6 @@ def save_logistic_ablation_plot(payload: dict[str, object], output_path: Path) -
     plt.close(fig)
 
 
-def save_probability_metrics_plot(payload: dict[str, object], output_path: Path) -> None:
-    output_path.parent.mkdir(parents=True, exist_ok=True)
-    overall = payload["summary"]["overall"]
-    models = [model for model in LOGISTIC_MODELS if model in overall]
-    x = np.arange(len(models))
-    fig, axes = plt.subplots(1, 3, figsize=(14.5, 4.8), constrained_layout=True)
-    specs = [
-        ("test_ce", "Test cross-entropy"),
-        ("test_brier", "Test Brier score"),
-        ("test_ece", "Test ECE"),
-    ]
-    for ax, (metric, title) in zip(axes, specs):
-        means = [overall[model][metric]["mean"] for model in models]
-        stds = [overall[model][metric]["std"] for model in models]
-        ax.bar(x, means, yerr=stds, capsize=3, color="#2f6f9f")
-        ax.set_title(title)
-        ax.set_xticks(x)
-        ax.set_xticklabels(models, rotation=15, ha="right")
-        ax.grid(True, axis="y", alpha=0.25)
-    fig.suptitle("Probability-quality metrics for the binary logistic architecture")
-    fig.savefig(output_path, dpi=180)
-    plt.close(fig)
-
-
 def save_ranking_plot(ranks: dict[str, object], output_path: Path) -> None:
     output_path.parent.mkdir(parents=True, exist_ok=True)
     models = sorted(ranks, key=lambda model: ranks[model]["mean"])
@@ -668,7 +644,6 @@ def write_latex_notes(paths: dict[str, Path], output_path: Path) -> None:
         "baseline_accuracy": "Comparison between the logistic ES prototype and standard tabular baselines.",
         "accuracy_time": "Accuracy/cost trade-off across logistic ES and non-ES models.",
         "logistic_ablation": "Ablation of the logistic architecture: linear features, random tanh features, and evolved CFS features.",
-        "probability_metrics": "Probability-quality metrics for the binary logistic architecture.",
         "ranking": "Average test-accuracy rank across dataset/seed pairs.",
     }
     for key, path in paths.items():
@@ -768,13 +743,11 @@ def main() -> None:
         "baseline_accuracy": output_dir / "baseline_test_accuracy.png",
         "accuracy_time": output_dir / "accuracy_time_tradeoff.png",
         "logistic_ablation": output_dir / "logistic_ablation.png",
-        "probability_metrics": output_dir / "binary_probability_metrics.png",
         "ranking": output_dir / "test_accuracy_ranking.png",
     }
     save_baseline_accuracy_plot(baseline_suite, paths["baseline_accuracy"])
     save_accuracy_time_plot(baseline_suite, paths["accuracy_time"])
     save_logistic_ablation_plot(baseline_suite, paths["logistic_ablation"])
-    save_probability_metrics_plot(baseline_suite, paths["probability_metrics"])
     save_ranking_plot(baseline_suite["test_accuracy_ranks"], paths["ranking"])
 
     summary_path = output_dir / "summary.json"

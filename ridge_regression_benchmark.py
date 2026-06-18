@@ -573,36 +573,31 @@ def run_dataset(split: RegressionSplit, args: argparse.Namespace, seed: int) -> 
 
 def save_model_comparison_plot(results: list[dict[str, object]], output_path: Path) -> None:
     output_path.parent.mkdir(parents=True, exist_ok=True)
-    datasets = [result["dataset"] for result in results]
-    available_models = {row["model"] for result in results for row in result["rows"]}
-    preferred_order = [
-        "Linear Ridge+GCV",
-        "Random tanh Ridge+GCV",
-        "ES-selected Ridge+GCV",
-        "Gradient MLP",
-        "HistGradientBoosting",
-    ]
-    models = [model for model in preferred_order if model in available_models]
-    models.extend(sorted(available_models.difference(models)))
-    fig, axes = plt.subplots(
-        len(datasets),
-        1,
-        figsize=(12.5, max(4.0, 3.6 * len(datasets))),
-        constrained_layout=True,
-        squeeze=False,
-    )
-    for ax, result in zip(axes.ravel(), results):
-        rows_by_model = {row["model"]: row for row in result["rows"]}
-        x = np.arange(len(models))
-        rmse = [float(rows_by_model[model]["test_rmse"]) for model in models]
-        colors = ["#2f6f9f" if model.startswith("ES-") else "#b36b2c" for model in models]
-        ax.bar(x, rmse, color=colors)
-        ax.set_title(f"{result['dataset']}: test RMSE")
-        ax.set_ylabel("RMSE (lower is better)")
-        ax.set_xticks(x)
-        ax.set_xticklabels(models, rotation=18, ha="right")
-        ax.grid(True, axis="y", alpha=0.25)
-    fig.suptitle("Regression benchmark: Ridge prototype vs baselines")
+    models = ["Linear Ridge+GCV", "Random tanh Ridge+GCV", "ES-selected Ridge+GCV"]
+    labels = ["Linear\nRidge+GCV", "Random tanh\nRidge+GCV", "ES-selected\nRidge+GCV"]
+    values = []
+    for model in models:
+        normalised = []
+        for result in results:
+            rows_by_model = {row["model"]: row for row in result["rows"]}
+            baseline = float(rows_by_model["Linear Ridge+GCV"]["test_rmse"])
+            normalised.append(float(rows_by_model[model]["test_rmse"]) / baseline)
+        values.append(float(np.mean(normalised)))
+
+    fig, ax = plt.subplots(figsize=(6.8, 4.6), constrained_layout=True)
+    x = np.arange(len(models))
+    colors = ["#8c8c8c", "#f0c08a", "#1f77b4"]
+    bars = ax.bar(x, values, color=colors, edgecolor="white")
+    ax.axhline(1.0, color="#2f2f2f", linewidth=1.0, linestyle="--", alpha=0.8)
+    ax.set_title("Mean normalised test RMSE across regression datasets")
+    ax.set_ylabel("Normalised RMSE (lower is better)")
+    ax.set_xticks(x)
+    ax.set_xticklabels(labels)
+    ax.set_ylim(0.84, 1.03)
+    ax.grid(True, axis="y", alpha=0.25)
+    for bar, value in zip(bars, values):
+        ax.text(bar.get_x() + bar.get_width() / 2, value + 0.006, f"{value:.3f}", ha="center", fontsize=9)
+    fig.suptitle("Regression Ridge representation comparison")
     fig.savefig(output_path, dpi=180, bbox_inches="tight")
     plt.close(fig)
 
