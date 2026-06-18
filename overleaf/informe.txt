@@ -605,11 +605,12 @@ One complication is that a full-network Pittsburgh baseline and the proposed
 Michigan model do not train the output layer in the same way. Pittsburgh
 evolves output weights as part of the chromosome, whereas Michigan fits them
 after selecting the hidden representation. For that reason, the experiments
-also include a matched-budget layer-level control. In that auxiliary control,
+also include a matched-budget Pittsburgh variant. In that auxiliary variant,
 the competing individual is a complete hidden layer and the same logistic
-output solver is fitted for every candidate layer. This control is not the
-main definition of Pittsburgh used in the thesis, but it helps separate the
-effect of representation from the effect of output fitting.
+output solver is fitted for every candidate layer. This is not the main
+Pittsburgh definition used in the thesis, where an individual is a complete
+network, but it helps separate the effect of representation from the effect of
+output fitting.
 
 \subsection{GA-Based Pittsburgh Training of One-Hidden-Layer MLPs}
 \label{subsec:sota_ga_mlp}
@@ -640,7 +641,7 @@ it does not answer the question that motivated this thesis: whether a hidden
 layer can be built from individually evolved neurons, rather than selected as
 part of a complete evolved network. The final benchmark therefore uses a
 Pittsburgh baseline in which each individual is a full one-hidden-layer
-network. A matched-budget layer-level control is kept as a secondary
+network. A matched-budget Pittsburgh variant is kept as a secondary
 diagnostic because it shares the output solver with Michigan.
 
 \subsection{ES-Based Pittsburgh Training of One-Hidden-Layer MLPs}
@@ -675,7 +676,7 @@ network is perturbed. In the Michigan ES implemented in this thesis, each
 neuron carries its own strategy matrix and competes for survival as one
 component of the hidden layer. The experiments compare the full-network
 Pittsburgh view with the Michigan view, and then add a matched-budget
-layer-level control to isolate the output-solver effect.
+Pittsburgh variant to isolate the output-solver effect.
 
 This local self-adaptation is particularly appropriate for hidden neurons.
 Different neurons may play different roles in the hidden representation. Some
@@ -779,9 +780,9 @@ final representation comparison is kept more controlled. The
 Michigan and Pittsburgh models share the same datasets, final hidden width,
 activation function, data splits, and validation rule. The main Pittsburgh
 baseline evolves the output weights as part of the complete network, which is
-the standard representation-level comparison. A secondary layer-level control
-then shares the logistic output solver with Michigan to isolate this part of
-the design.
+the standard representation-level comparison. A secondary matched-budget
+Pittsburgh variant then shares the logistic output solver with Michigan to
+isolate this part of the design.
 
 For that reason, the Pittsburgh experiment is not only another baseline. It is the
 experiment that connects the implementation to the original research question.
@@ -916,7 +917,7 @@ candidate network. In the Michigan version, the algorithm can generate many
 candidate neurons, select a subset, and solve the output layer once per
 generation. This is the main reason for comparing the method with a
 Pittsburgh baseline that evolves complete networks. The matched-budget
-layer-level control then checks the same idea when the output solver is
+Pittsburgh variant then checks the same idea when the output solver is
 shared.
 
 From the prediction point of view, the method separates nonlinear feature
@@ -1174,11 +1175,41 @@ penalty term.
 The next idea was to choose neurons according to what the current selected
 set still fails to explain. Orthogonal Matching Pursuit (OMP) is useful for
 this because it is a greedy sparse-approximation method. The target is
-centred, candidate activation columns are normalised, and the neuron most
-aligned with the current residual is selected. The selected direction is
-orthogonalised using a Modified Gram-Schmidt step, and the residual is
-updated. Later selections then focus on information that the current
-subset has not yet captured.
+centred and the initial residual is
+\[
+    \mathbf{r}^{(0)} = \mathbf{y} - \overline{y}.
+\]
+At step $t$, after some neurons have already been selected, OMP chooses the
+candidate activation column most aligned with the current residual:
+\[
+    i_t
+    =
+    \arg\max_{i\notin\mathcal{S}_{t-1}}
+    \left|
+    \frac{
+    \boldsymbol{\phi}_i^\top\mathbf{r}^{(t-1)}
+    }{
+    \|\boldsymbol{\phi}_i\|_2
+    }
+    \right|.
+\]
+After selecting neuron $i_t$, the selected design matrix
+$\boldsymbol{\Phi}_{\mathcal{S}_t}$ is updated and the residual becomes
+\[
+    \mathbf{r}^{(t)}
+    =
+    \mathbf{y}
+    -
+    \boldsymbol{\Phi}_{\mathcal{S}_t}
+    \widehat{\boldsymbol{\beta}}_{\mathcal{S}_t},
+    \qquad
+    \widehat{\boldsymbol{\beta}}_{\mathcal{S}_t}
+    =
+    \arg\min_{\boldsymbol{\beta}}
+    \|\mathbf{y}-\boldsymbol{\Phi}_{\mathcal{S}_t}\boldsymbol{\beta}\|_2^2.
+\]
+The implementation uses an orthogonalised update, so later selections focus
+on information that the current subset has not yet captured.
 
 Conceptually, OMP is closer to the desired behaviour than pure marginal
 ranking. The first selected neuron may be the one most related to the target,
@@ -1534,10 +1565,10 @@ larger.
 The final experiment measures this point directly. Michigan creates 250 new
 candidate neurons per generation and fits the logistic output once. The
 full-network Pittsburgh baseline evaluates 400 complete networks per
-generation. A secondary matched-budget layer-level control also creates 250
-new hidden neurons per generation, but it must fit the logistic output 10
-times because every candidate hidden layer needs its own output solve. This
-explains why computational cost is a central part of the empirical comparison.
+generation. A secondary matched-budget Pittsburgh variant also creates 250 new
+hidden neurons per generation, but it must fit the logistic output 10 times
+because every candidate hidden layer needs its own output solve. This explains
+why computational cost is a central part of the empirical comparison.
 
 The cost can be understood more concretely by separating three operations.
 First, candidate activations must be computed. For $m$ samples, $n$ features,
@@ -1547,8 +1578,8 @@ is computing and using candidate-candidate correlations, which grows with the
 number of candidates. Third, the output layer must be fitted. In the binary
 classification comparison this means fitting the logistic model on the
 selected design matrix. In Michigan, this happens once per generation. In
-the layer-level control, it happens once per candidate hidden layer. In the
-full-network Pittsburgh baseline, output fitting is replaced by a larger
+the matched-budget Pittsburgh variant, it happens once per candidate hidden
+layer. In the full-network Pittsburgh baseline, output fitting is replaced by a larger
 evolutionary search over hidden and output weights together. In the regression
 path, the analogous operation is the Ridge/GCV SVD solve.
 
@@ -1563,14 +1594,15 @@ mutated offspring neurons would need a fresh forward pass on the training data;
 the $\mu$ parent activations could be reused until their neuron is replaced.
 This would strengthen the forward-pass advantage over Pittsburgh, where each
 candidate is a complete network and a fresh full-network evaluation is needed.
-It would also strengthen the comparison with the layer-level control, where
-the output fit must still be repeated for many candidate hidden layers.
+It would also strengthen the comparison with the matched-budget Pittsburgh
+variant, where the output fit must still be repeated for many candidate hidden
+layers.
 
 This decomposition clarifies why the comparison is not trivial. Michigan can
 spend more time on selection because it evaluates many individual neurons.
 Pittsburgh avoids Michigan's cooperative selection problem, but pays for a
-larger full-network search. The layer-level control pays a different cost:
-many repeated output solves. The better method depends on how these costs
-balance and on how well the selected/evolved representation generalises. The
-final experiment shows that, for the tested datasets and budgets, the Michigan
-balance is favourable.
+larger full-network search. The matched-budget Pittsburgh variant pays a
+different cost: many repeated output solves. The better method depends on how
+these costs balance and on how well the selected/evolved representation
+generalises. The final experiment shows that, for the tested datasets and
+budgets, the Michigan balance is favourable.

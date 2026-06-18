@@ -153,7 +153,7 @@ into the following sub-objectives:
     if evolving individual neurons is worthwhile, it should offer some advantage
     in predictive performance, computational cost, generalisation behaviour, or
     accuracy-time trade-off when compared with evolving complete neural networks.
-    A secondary objective is to include a matched-budget layer-level control to
+    A secondary objective is to include a matched-budget Pittsburgh variant to
     check whether the conclusion still holds when the output solver is shared.
 \end{enumerate}
 
@@ -187,8 +187,8 @@ probabilistic multiclass model. The sparse logistic experiment is valuable
 because it shows that the final hidden layer can be compressed after
 evolutionary selection. The Michigan--Pittsburgh experiment is valuable
 because it tests the initial representation hypothesis directly, first against
-full-network Pittsburgh evolution and then with a matched-budget layer-level
-control.
+full-network Pittsburgh evolution and then with a matched-budget Pittsburgh
+variant.
 
 The thesis follows an engineering research style. It starts from a
 conceptual idea, implements it, identifies its weaknesses, improves the

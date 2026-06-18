@@ -1,15 +1,16 @@
 """
 benchmark_level1.py
 
-Matched-budget layer-level control for the binary logistic architecture.
+Matched-budget Pittsburgh variant for the binary logistic architecture.
 
 The goal of this script is to isolate the hidden-representation difference
 while keeping the logistic output solver fixed:
 
 * Michigan: each individual is one hidden neuron. The population itself is the
   hidden layer. Neuron-level fitness is handled by CFS neuron selection.
-* Layer-level control: each individual is a complete hidden layer. A whole
-  candidate layer is evaluated with the same logistic output layer.
+* Pittsburgh matched-budget variant: each individual is a complete hidden
+  layer. A whole candidate layer is evaluated with the same logistic output
+  layer.
 
 Both variants use:
 
@@ -567,7 +568,7 @@ def _architecture_configs(args: argparse.Namespace) -> list[ArchitectureConfig]:
         ),
         ArchitectureConfig(
             name="pittsburgh_matched",
-            label="Layer-level matched control",
+            label="Pittsburgh matched-budget",
             kind="pittsburgh",
             hidden_units=args.hidden_units,
             epochs=args.epochs,
@@ -773,7 +774,7 @@ def save_accuracy_plot(payload: dict[str, Any], output_dir: Path) -> None:
     fig, ax = plt.subplots(figsize=(10.5, 5.4), constrained_layout=True)
     ax.bar(x - width / 2, val_means, width, yerr=val_sem, capsize=4, label="Validation")
     ax.bar(x + width / 2, test_means, width, yerr=test_sem, capsize=4, label="Test")
-    ax.set_title("Matched-budget layer-level control: validation and test accuracy")
+    ax.set_title("Matched-budget Pittsburgh variant: validation and test accuracy")
     ax.set_ylabel("Accuracy")
     ax.set_xticks(x)
     ax.set_xticklabels(labels, rotation=10, ha="right")
@@ -952,7 +953,7 @@ def save_latex_notes(payload: dict[str, Any], output_dir: Path) -> None:
     lines.append("\\begin{table}[H]")
     lines.append("\\centering")
     lines.append(
-        "\\caption{Matched-budget layer-level control over Breast-W, Ionosphere, and Sonar.}"
+        "\\caption{Matched-budget Pittsburgh variant over Breast-W, Ionosphere, and Sonar.}"
     )
     lines.append("\\label{tab:exp_michigan_pittsburgh_overall}")
     lines.append("\\resizebox{\\textwidth}{!}{%")
@@ -983,7 +984,7 @@ def save_latex_notes(payload: dict[str, Any], output_dir: Path) -> None:
     lines.append("\\begin{table}[H]")
     lines.append("\\centering")
     lines.append(
-        "\\caption{Per-dataset mean test accuracy in the matched-budget layer-level control.}"
+        "\\caption{Per-dataset mean test accuracy in the matched-budget Pittsburgh variant.}"
     )
     lines.append("\\label{tab:exp_michigan_pittsburgh_dataset}")
     lines.append("\\begin{tabular}{@{}lrrr@{}}")
@@ -1010,7 +1011,7 @@ def save_latex_notes(payload: dict[str, Any], output_dir: Path) -> None:
         "\\includegraphics[width=0.95\\textwidth]{runs/michigan_pittsburgh/michigan_pittsburgh_accuracy.png}"
     )
     lines.append(
-        "\\caption{Validation and test accuracy for Michigan and the layer-level control.}"
+        "\\caption{Validation and test accuracy for Michigan and the matched-budget Pittsburgh variant.}"
     )
     lines.append("\\label{fig:exp_michigan_pittsburgh_accuracy}")
     lines.append("\\end{figure}")
@@ -1021,7 +1022,7 @@ def save_latex_notes(payload: dict[str, Any], output_dir: Path) -> None:
         "\\includegraphics[width=0.95\\textwidth]{runs/michigan_pittsburgh/michigan_pittsburgh_cost.png}"
     )
     lines.append(
-        "\\caption{Computational cost of Michigan and the layer-level control.}"
+        "\\caption{Computational cost of Michigan and the matched-budget Pittsburgh variant.}"
     )
     lines.append("\\label{fig:exp_michigan_pittsburgh_cost}")
     lines.append("\\end{figure}")
@@ -1032,7 +1033,7 @@ def save_latex_notes(payload: dict[str, Any], output_dir: Path) -> None:
         "\\includegraphics[width=0.88\\textwidth]{runs/michigan_pittsburgh/michigan_pittsburgh_accuracy_time.png}"
     )
     lines.append(
-        "\\caption{Accuracy--time trade-off in the matched-budget layer-level control.}"
+        "\\caption{Accuracy--time trade-off in the matched-budget Pittsburgh variant.}"
     )
     lines.append("\\label{fig:exp_michigan_pittsburgh_accuracy_time}")
     lines.append("\\end{figure}")
@@ -1043,7 +1044,7 @@ def save_latex_notes(payload: dict[str, Any], output_dir: Path) -> None:
 
 def print_summary(payload: dict[str, Any]) -> None:
     overall = payload["summary"]["overall"]
-    print("\n## Matched-Budget Layer-Level Control Summary")
+    print("\n## Matched-Budget Pittsburgh Variant Summary")
     print(
         "| Architecture | Val Acc | Test Acc | Val-Test Gap | Test AUC | Fit s | New neurons/gen | Output fits/gen |"
     )
@@ -1064,7 +1065,7 @@ def print_summary(payload: dict[str, Any]) -> None:
 
 def build_arg_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
-        description="Matched-budget layer-level control for the binary logistic architecture."
+        description="Matched-budget Pittsburgh variant for the binary logistic architecture."
     )
     parser.add_argument(
         "--datasets",

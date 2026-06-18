@@ -548,7 +548,7 @@ def save_aggregate_cost_plot(
     labels = [r"$R^2$" if strategy == "r2" else strategy.upper().replace("_", "-") for strategy in strategies]
     select_ms = [overall[strategy]["select_ms_mean"]["mean"] for strategy in strategies]
     elapsed = [overall[strategy]["elapsed_seconds"]["mean"] for strategy in strategies]
-    colors = ["#8c8c8c", "#f0c08a", "#1f77b4", "#d07a24"][: len(strategies)]
+    colors = ["#7F7F7F", "#F5D7A1", "#0072B2", "#E69F00"][: len(strategies)]
 
     fig, axes = plt.subplots(1, 2, figsize=(10.8, 4.5), constrained_layout=True)
     x = np.arange(len(strategies))

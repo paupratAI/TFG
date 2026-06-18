@@ -52,8 +52,8 @@ The fifth objective was to compare the Michigan representation with a
 Pittsburgh-style evolutionary representation. The final experiment addresses
 this objective directly. Against full-network Pittsburgh evolution, Michigan
 ES-CFS obtains higher test accuracy and ROC-AUC, a smaller validation-test
-gap, and lower runtime in the tested setting. The matched-budget layer-level
-control points in the same direction while sharing the output solver. This is
+gap, and lower runtime in the tested setting. The matched-budget Pittsburgh
+variant points in the same direction while sharing the output solver. This is
 the result most directly aligned with the original motivation of the thesis.
 
 \subsection{Main Technical Conclusions}
@@ -82,7 +82,7 @@ advantage is lost in the probabilistic classifiers.
 The Michigan--Pittsburgh comparison gives the clearest support for the
 original idea. Under the tested setting, evolving individual neurons gives a
 better accuracy-time trade-off than evolving complete neural networks. The
-matched-budget layer-level control supports the same interpretation from a
+matched-budget Pittsburgh variant supports the same interpretation from a
 more isolated perspective. This does not make the method a universal benchmark
 winner, but it does show that the architecture is coherent and empirically
 defensible.
@@ -99,7 +99,7 @@ A second limitation is experimental scope. Regression, sparse logistic
 filtering, and softmax are evaluated as targeted extensions rather than as a
 single unified modelling framework. The Pittsburgh comparison is also a
 specific baseline, not a judgement on every possible Pittsburgh algorithm.
-The layer-level control helps isolate representation, but it is not the main
+The matched-budget Pittsburgh variant helps isolate representation, but it is not the main
 Pittsburgh definition used in the thesis.
 
 Probability quality also remains an issue in the logistic variants. The

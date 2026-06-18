@@ -26,14 +26,14 @@ import numpy as np
 RUNS_DIR = Path("runs")
 PLOTS_DIR = Path("plots_overleaf")
 
-BLUE = "#1f77b4"
-ORANGE = "#d07a24"
-GREEN = "#2b8a3e"
-RED = "#b23b3b"
-GREY = "#8c8c8c"
-DARK = "#2f2f2f"
-LIGHT_BLUE = "#b8d8f2"
-LIGHT_ORANGE = "#f0c08a"
+BLUE = "#0072B2"
+ORANGE = "#E69F00"
+GREEN = "#009E73"
+RED = "#D55E00"
+GREY = "#7F7F7F"
+DARK = "#2B2B2B"
+LIGHT_BLUE = "#D6EAF5"
+LIGHT_ORANGE = "#F5D7A1"
 
 
 def _load_json(path: str | Path) -> dict:
@@ -310,11 +310,39 @@ def save_softmax_model_comparison() -> None:
     _save(fig, "softmax_model_comparison.png")
 
 
+def save_softmax_representation_value() -> None:
+    models = ["Linear Softmax CE", "Random tanh Softmax CE", "ES-CFS Softmax CE"]
+    colors = [GREY, LIGHT_ORANGE, BLUE]
+    datasets = list(SOFTMAX_ROWS)
+    x = np.arange(len(datasets))
+    width = 0.22
+
+    fig, ax = plt.subplots(figsize=(11.5, 5.2), constrained_layout=True)
+    for i, model in enumerate(models):
+        values = [SOFTMAX_ROWS[dataset][model]["test_accuracy"] for dataset in datasets]
+        ax.bar(
+            x + (i - 1) * width,
+            values,
+            width,
+            label=model,
+            color=colors[i],
+            edgecolor="white",
+        )
+    ax.set_ylim(0.0, 1.05)
+    ax.set_title("Value of evolved hidden representation with softmax output")
+    ax.set_ylabel("Test accuracy")
+    ax.set_xticks(x)
+    ax.set_xticklabels(datasets, rotation=10, ha="right")
+    ax.grid(True, axis="y", alpha=0.25)
+    ax.legend(frameon=False)
+    _save(fig, "softmax_representation_value.png")
+
+
 def save_michigan_pittsburgh_summary() -> None:
     payload = _load_json("runs/michigan_pittsburgh/michigan_pittsburgh_summary.json")
     overall = payload["summary"]["overall"]
     order = ["michigan_cfs", "pittsburgh_matched"]
-    labels = ["Michigan\nES-CFS", "Layer-level\nmatched"]
+    labels = ["Michigan\nES-CFS", "Pittsburgh\nmatched-budget"]
     colors = [BLUE, ORANGE]
 
     test_acc = [_mean(overall[k], "test_acc") for k in order]
@@ -373,7 +401,7 @@ def save_michigan_pittsburgh_summary() -> None:
     axes[2].set_xlim(0.0, max(seconds) * 1.22)
     axes[2].set_ylim(0.78, 0.91)
 
-    fig.suptitle("Matched-budget layer-level control")
+    fig.suptitle("Matched-budget Pittsburgh variant")
     _save(fig, "michigan_pittsburgh_summary.png")
 
 
@@ -494,6 +522,7 @@ def main() -> None:
     save_regression_model_comparison()
     save_regression_value_summary()
     save_softmax_model_comparison()
+    save_softmax_representation_value()
     save_michigan_pittsburgh_summary()
     save_full_network_pittsburgh_summary()
     print("Generated final thesis plots in runs/ and plots_overleaf/.")

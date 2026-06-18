@@ -363,7 +363,7 @@ ES-CFS Logistic CE & $\mathbf{0.920}\pm0.060$ & $\mathbf{0.881}\pm0.072$ & $\mat
 \centering
 \includegraphics[width=0.95\textwidth]{plots_overleaf/logistic_ablation.png}
 \caption{Ablation of the binary logistic architecture: raw input features, random tanh features, and evolved ES-CFS hidden features.}
-\label{fig:ridge_ablation}
+\label{fig:logistic_ablation}
 \end{figure}
 
 This is one of the clearest binary-classification results. Linear Logistic CE
@@ -554,23 +554,46 @@ this setting makes the representation argument more robust.
 \subsubsection{L1-Logistic Output-Layer Filtering}
 \label{subsec:experiments_lasso}
 
-The full logistic output keeps all selected neurons active. The sparse output
-experiment tests whether an L1 penalty can act as a second filter after the
-Michigan selection step. The ES first selects 50 neurons from a pool of
-candidate neurons. L1-logistic then tries to remove redundant survivors by
-setting output coefficients to zero.
+The ES-CFS model always starts from the same hidden representation: the
+Michigan ES selects 50 hidden neurons from the candidate pool. The question in
+this experiment is what should happen after those 50 neurons have been
+selected. The standard logistic output uses the complete selected hidden
+layer. However, the fitness strategy used during evolution is still a
+cooperative criterion, so it is possible that some surviving neurons are useful
+for the selection process but redundant once the final logistic output is
+fitted. The L1-logistic experiment therefore tests whether the output layer can
+act as a second, simpler filter by setting unnecessary output coefficients
+exactly to zero.
 
-The experiment compares Full ES-CFS Logistic CE, ES-CFS L1 Logistic, and
-L1-screened ES-CFS Logistic CE. It uses Breast-W, Ionosphere, and Sonar with
-ten seeds. The L1 regularisation strength is selected on the validation
-split using a sparsity-aware rule:
+Three variants are compared, and they differ only in the output layer fitted
+after ES-CFS has selected the hidden representation. \emph{Full ES-CFS
+Logistic CE} is the reference model: it fits an unregularised logistic output
+with cross-entropy using all 50 ES-selected neurons, so no neuron is removed
+after the evolutionary stage. \emph{ES-CFS L1 Logistic} fits a sparse logistic
+output on the same 50 neurons. In this case, the L1 penalty is part of the
+final classifier itself: neurons whose output coefficient is driven to zero do
+not contribute to the prediction, and the remaining coefficients are the
+regularised coefficients used at test time. \emph{L1-screened ES-CFS Logistic
+CE} is a two-stage variant. First, an L1-logistic model is used only to screen
+the hidden layer and identify the neurons with non-zero coefficients. Then the
+zero-weight neurons are discarded, and a new unregularised logistic output is
+refitted with cross-entropy on the reduced hidden layer. Thus, ``screened''
+means that L1 is used as a neuron-selection filter, not as the final set of
+output weights.
+
+The experiment uses Breast-W, Ionosphere, and Sonar with ten seeds. The L1
+regularisation strength is selected on the validation split using a
+sparsity-aware rule:
 \[
     \mathrm{ValAcc}
     -
     0.05
     \frac{\#\mathrm{active\ neurons}}{50}.
 \]
-The test set is not used for selecting the L1 parameter.
+The test set is not used for selecting the L1 parameter. This makes the
+comparison useful for two questions at once: whether the 50-neuron hidden
+layer can be compressed, and whether removing neurons improves or damages
+final predictive performance.
 
 \begin{table}[htbp]
 \centering
@@ -596,13 +619,18 @@ L1-screened ES-CFS Logistic CE & $\mathbf{0.926}\pm0.011$ & $0.891\pm0.016$ & $0
 \label{fig:lasso_accuracy_sparsity}
 \end{figure}
 
-The result is valuable because it is not a trivial compression failure.
-Direct L1-logistic slightly improves mean test accuracy and ROC-AUC over the
-full logistic output while using only 18.47 active neurons on average. More
+The result is valuable because it is not a trivial compression failure. Direct
+L1-logistic slightly improves mean test accuracy and ROC-AUC over the full
+logistic output while using only 18.47 active neurons on average. More
 importantly, its mean test cross-entropy drops from $1.759$ to $0.452$. This
 shows that the L1 penalty is not only making the model smaller; it is also
 reducing the overconfident probabilities produced by the unregularised full
-logistic output.
+logistic output. The screened variant is also informative: it obtains the best
+mean validation accuracy and the sparsest model, but its mean test accuracy is
+slightly below the direct L1 output. This suggests that, in this setting, L1 is
+more useful when its shrinkage remains part of the final classifier than when
+it is used only to choose a reduced subset and the output is refitted without
+regularisation.
 
 \begin{table}[htbp]
 \centering
@@ -806,28 +834,31 @@ does address the central question of the thesis directly: when Pittsburgh is
 implemented as full-network evolution, the proposed Michigan representation
 offers a better generalisation-cost balance in the tested setting.
 
-\paragraph{Matched-budget layer-level control.}
+\subsubsection{Matched-Budget Pittsburgh Variant}
 The full-network comparison is conceptually the most faithful Pittsburgh
 baseline, but it changes the output training mechanism: Pittsburgh evolves the
 output weights, while Michigan fits them after selecting the hidden layer. For
-that reason, a secondary control experiment was also included. In this control,
-the competing evolutionary object is a complete hidden layer, not a complete
-network. Each candidate hidden layer is evaluated with the same logistic
-output fitting procedure used by Michigan. This is not the default meaning of
-Pittsburgh in the thesis, but it is useful because it isolates the hidden-layer
-representation while keeping the output solver fixed.
+that reason, a secondary Pittsburgh variant was also included. This variant is
+not the main Pittsburgh baseline used in the thesis, because its individual
+does not contain the output weights. Instead, each Pittsburgh individual
+represents a complete hidden layer of 50 neurons. Once this hidden layer is
+decoded, it is evaluated with the same logistic output fitting procedure used
+by Michigan. The purpose of this variant is to keep the output solver fixed
+and isolate the representation question: Michigan evolves individual neurons
+that later cooperate, whereas this Pittsburgh variant evolves complete hidden
+layers as indivisible candidates.
 
 The control is matched by the number of newly generated hidden neurons.
-Michigan creates 250 new candidate neurons per generation. The layer-level
-control uses 5 parent hidden layers and 5 offspring hidden layers; since each
-layer has 50 neurons, it also creates 250 new hidden neurons per generation.
-The difference is that the control must fit the logistic output for 10
-complete hidden layers per generation, whereas Michigan fits it once after
-selecting its neuron population.
+Michigan creates 250 new candidate neurons per generation. The matched-budget
+Pittsburgh variant uses 5 parent hidden layers and 5 offspring hidden layers;
+since each layer has 50 neurons, it also creates 250 new hidden neurons per
+generation. The difference is that this Pittsburgh variant must fit the
+logistic output for 10 complete hidden layers per generation, whereas Michigan
+fits it once after selecting its neuron population.
 
 \begin{table}[htbp]
 \centering
-\caption{Matched-budget layer-level control. Values are mean $\pm$ standard error over 15 dataset/seed runs.}
+\caption{Matched-budget Pittsburgh variant. Values are mean $\pm$ standard error over 15 dataset/seed runs.}
 \label{tab:michigan_pittsburgh_overall}
 \resizebox{\textwidth}{!}{%
 \begin{tabular}{lrrrrrrr}
@@ -835,7 +866,7 @@ selecting its neuron population.
 Architecture & Val Acc & Test Acc & Val--Test Gap & Test AUC & Fit s & New neurons/gen & Output fits/gen \\
 \midrule
 Michigan ES-CFS & $0.924\pm0.014$ & $\mathbf{0.882}\pm0.022$ & $\mathbf{0.042}\pm0.012$ & $\mathbf{0.935}\pm0.014$ & $\mathbf{0.444}\pm0.036$ & $250$ & $\mathbf{1.0}$ \\
-Layer-level matched control & $\mathbf{0.941}\pm0.010$ & $0.816\pm0.032$ & $0.125\pm0.025$ & $0.840\pm0.030$ & $1.474\pm0.036$ & $250$ & $10.0$ \\
+Pittsburgh matched-budget & $\mathbf{0.941}\pm0.010$ & $0.816\pm0.032$ & $0.125\pm0.025$ & $0.840\pm0.030$ & $1.474\pm0.036$ & $250$ & $10.0$ \\
 \bottomrule
 \end{tabular}%
 }
@@ -844,40 +875,38 @@ Layer-level matched control & $\mathbf{0.941}\pm0.010$ & $0.816\pm0.032$ & $0.12
 \begin{figure}[htbp]
 \centering
 \includegraphics[width=0.98\textwidth]{plots_overleaf/michigan_pittsburgh_summary.png}
-\caption{Matched-budget layer-level control. The competing evolutionary object is a full hidden layer evaluated with the same logistic output solver, while Michigan evolves individual neurons.}
+\caption{Matched-budget Pittsburgh variant. Here a Pittsburgh individual represents a full hidden layer evaluated with the same logistic output solver, while a Michigan individual represents one hidden neuron.}
 \label{fig:michigan_pittsburgh_summary}
 \end{figure}
 
 \begin{table}[htbp]
 \centering
-\caption{Per-dataset mean test accuracy in the matched-budget layer-level control.}
+\caption{Per-dataset mean test accuracy in the matched-budget Pittsburgh variant.}
 \label{tab:michigan_pittsburgh_dataset}
-\resizebox{\textwidth}{!}{%
 \begin{tabular}{lrr}
 \toprule
-Dataset & Michigan ES-CFS & Layer-level matched control \\
+Dataset & Michigan ES-CFS & Pittsburgh matched-budget \\
 \midrule
 Breast-W & $\mathbf{0.954}\pm0.007$ & $0.949\pm0.007$ \\
 Ionosphere & $\mathbf{0.915}\pm0.017$ & $0.834\pm0.012$ \\
 Sonar & $\mathbf{0.776}\pm0.019$ & $0.667\pm0.030$ \\
 \bottomrule
 \end{tabular}%
-}
 \end{table}
 
-The control points in the same direction as the full-network comparison. The
-layer-level control obtains higher validation accuracy than Michigan, but a
-lower test accuracy and a larger validation-test gap. The cost is also higher:
-even with the same new-neuron budget, the control fits the output layer 10
-times per generation. This supports the interpretation that the Michigan
-representation is not only cheaper because its individuals are smaller; it is
-also useful because it can assemble one cooperative hidden layer from many
-candidate neurons before fitting the output model.
+The matched-budget Pittsburgh variant points in the same direction as the
+full-network comparison. It obtains higher validation accuracy than Michigan,
+but a lower test accuracy and a larger validation-test gap. The cost is also
+higher: even with the same new-neuron budget, this Pittsburgh variant fits the
+output layer 10 times per generation. This supports the interpretation that
+the Michigan representation is not only cheaper because its individuals are
+smaller; it is also useful because it can assemble one cooperative hidden layer
+from many candidate neurons before fitting the output model.
 
 Together, the two comparisons are useful for different reasons. The main
 Pittsburgh experiment uses the standard complete-network interpretation and is
 therefore the most conceptually important result. The matched-budget
-layer-level control removes one possible confounding factor by sharing the
+Pittsburgh variant removes one possible confounding factor by sharing the
 output solver. Both results favour the proposed Michigan representation under
 the tested setting.
 
@@ -892,7 +921,7 @@ even though classical tabular baselines remain very strong. The regression
 benchmark keeps the Ridge/GCV architecture where it is most natural, while
 the L1-logistic and softmax experiments broaden the probabilistic
 classification evidence. The full-network Michigan--Pittsburgh comparison,
-supported by the matched-budget layer-level control, addresses the original
+supported by the matched-budget Pittsburgh variant, addresses the original
 motivation directly.
 
 The most specific evidence comes from the logistic ablation, the regression
@@ -910,7 +939,7 @@ limited scope of the Pittsburgh baseline. The binary experiments use only
 three small tabular datasets, and several experiments would benefit from more
 seeds. The Pittsburgh comparison uses one concrete full-network ES baseline,
 not every possible Pittsburgh neuroevolution method. The matched-budget
-layer-level control is useful for isolating representation, but it should be
+Pittsburgh variant is useful for isolating representation, but it should be
 interpreted as an auxiliary diagnostic rather than as the default Pittsburgh
 formulation.
 

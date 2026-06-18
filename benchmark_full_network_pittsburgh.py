@@ -45,11 +45,11 @@ from data import load_dataset_with_validation
 from logistic_output import binary_log_loss_from_proba, labels_to_binary, sigmoid
 
 
-BLUE = "#1f77b4"
-ORANGE = "#d07a24"
-LIGHT_ORANGE = "#f0c08a"
-DARK = "#2f2f2f"
-GREY = "#8c8c8c"
+BLUE = "#0072B2"
+ORANGE = "#E69F00"
+LIGHT_ORANGE = "#F5D7A1"
+DARK = "#2B2B2B"
+GREY = "#7F7F7F"
 
 
 @dataclass(frozen=True)
@@ -517,7 +517,7 @@ def save_plots(payload: dict[str, Any], output_dir: Path, plots_dir: Path) -> No
     x = np.arange(len(names))
     width = 0.34
 
-    metric_colors = {"Validation": "#b8d8f2", "Test": BLUE}
+    metric_colors = {"Validation": "#D6EAF5", "Test": BLUE}
     axes[0].bar(
         x - width / 2,
         val_acc,

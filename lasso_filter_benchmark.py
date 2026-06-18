@@ -503,7 +503,7 @@ def save_accuracy_sparsity_plot(summary: dict[str, object], output_path: Path) -
     test_sem = [overall[model]["test_acc"]["sem"] for model in models]
     active_means = [overall[model]["active_neurons"]["mean"] for model in models]
     active_sem = [overall[model]["active_neurons"]["sem"] for model in models]
-    colors = ["#2f6f9f", "#8a8f2f", "#2f8f5f"]
+    colors = ["#7F7F7F", "#0072B2", "#009E73"]
 
     fig, axes = plt.subplots(1, 3, figsize=(15.0, 4.6), constrained_layout=True)
     axes[0].bar(x, val_means, yerr=val_sem, capsize=4, color=colors)
@@ -551,7 +551,14 @@ def save_dataset_sparsity_plot(summary: dict[str, object], output_path: Path) ->
             summary["by_dataset"][dataset][model]["active_neurons"]["mean"]
             for dataset in datasets
         ]
-        ax.bar(x + (i - 1) * width, means, width=width, label=labels[i])
+        ax.bar(
+            x + (i - 1) * width,
+            means,
+            width=width,
+            label=labels[i],
+            color=["#7F7F7F", "#0072B2", "#009E73"][i],
+            edgecolor="white",
+        )
     ax.set_title("Selected active neurons by dataset")
     ax.set_ylabel("Active hidden neurons")
     ax.set_xticks(x)

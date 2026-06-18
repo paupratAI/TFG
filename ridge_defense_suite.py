@@ -534,7 +534,7 @@ def save_baseline_accuracy_plot(payload: dict[str, object], output_path: Path) -
             summary[dataset][model].get("test_acc", {"std": 0.0})["std"]
             for model in models
         ]
-        colors = ["#2f6f9f" if model in LOGISTIC_MODELS else "#b36b2c" for model in models]
+        colors = ["#0072B2" if model in LOGISTIC_MODELS else "#E69F00" for model in models]
         ax.bar(x, means, yerr=stds, capsize=3, color=colors)
         ax.set_title(f"{dataset}: test accuracy across seeds")
         ax.set_ylabel("Test accuracy")
@@ -557,7 +557,7 @@ def save_accuracy_time_plot(payload: dict[str, object], output_path: Path) -> No
         y = overall[model]["test_acc"]["mean"]
         xerr = overall[model]["fit_seconds"]["std"]
         yerr = overall[model]["test_acc"]["std"]
-        color = "#2f6f9f" if model in LOGISTIC_MODELS else "#b36b2c"
+        color = "#0072B2" if model in LOGISTIC_MODELS else "#E69F00"
         ax.errorbar(
             x,
             y,
@@ -583,36 +583,92 @@ def save_logistic_ablation_plot(payload: dict[str, object], output_path: Path) -
     output_path.parent.mkdir(parents=True, exist_ok=True)
     overall = payload["summary"]["overall"]
     models = [model for model in LOGISTIC_MODELS if model in overall]
+    labels = ["Linear\nfeatures", "Random tanh\nfeatures", "Evolved ES-CFS\nfeatures"]
     x = np.arange(len(models))
     width = 0.36
     val_means = [overall[model]["validation_acc"]["mean"] for model in models]
-    val_stds = [overall[model]["validation_acc"]["std"] for model in models]
+    val_stds = [
+        overall[model]["validation_acc"]["std"] / np.sqrt(max(1, overall[model].get("n_runs", 1)))
+        for model in models
+    ]
     test_means = [overall[model]["test_acc"]["mean"] for model in models]
-    test_stds = [overall[model]["test_acc"]["std"] for model in models]
+    test_stds = [
+        overall[model]["test_acc"]["std"] / np.sqrt(max(1, overall[model].get("n_runs", 1)))
+        for model in models
+    ]
     auc_means = [overall[model]["test_roc_auc"]["mean"] for model in models]
-    auc_stds = [overall[model]["test_roc_auc"]["std"] for model in models]
+    auc_stds = [
+        overall[model]["test_roc_auc"]["std"] / np.sqrt(max(1, overall[model].get("n_runs", 1)))
+        for model in models
+    ]
 
-    fig, axes = plt.subplots(1, 2, figsize=(12.5, 5.0), constrained_layout=True)
-    axes[0].bar(x - width / 2, val_means, width, yerr=val_stds, capsize=3, label="Validation")
-    axes[0].bar(x + width / 2, test_means, width, yerr=test_stds, capsize=3, label="Test")
+    fig, axes = plt.subplots(1, 2, figsize=(13.2, 5.2), constrained_layout=True)
+    metric_colors = {"Validation": "#D6EAF5", "Test": "#0072B2"}
+    bars_val = axes[0].bar(
+        x - width / 2,
+        val_means,
+        width,
+        color=metric_colors["Validation"],
+        edgecolor="white",
+        linewidth=0.8,
+        label="Validation",
+    )
+    bars_test = axes[0].bar(
+        x + width / 2,
+        test_means,
+        width,
+        color=metric_colors["Test"],
+        edgecolor="white",
+        linewidth=0.8,
+        label="Test",
+    )
     axes[0].set_title("Accuracy contribution")
     axes[0].set_ylabel("Accuracy")
-    axes[0].set_ylim(0.0, 1.02)
+    axes[0].set_ylim(0.78, 0.96)
     axes[0].set_xticks(x)
-    axes[0].set_xticklabels(models, rotation=15, ha="right")
+    axes[0].set_xticklabels(labels)
     axes[0].grid(True, axis="y", alpha=0.25)
-    axes[0].legend()
+    axes[0].legend(frameon=False, loc="upper left")
+    for bars, values in ((bars_val, val_means), (bars_test, test_means)):
+        for bar, value in zip(bars, values):
+            axes[0].text(
+                bar.get_x() + bar.get_width() / 2,
+                value + 0.006,
+                f"{value:.3f}",
+                ha="center",
+                va="bottom",
+                fontsize=8,
+            )
 
-    axes[1].bar(x, auc_means, yerr=auc_stds, capsize=3, color="#2f6f9f")
+    auc_colors = ["#7F7F7F", "#F5D7A1", "#0072B2"]
+    bars_auc = axes[1].bar(
+        x,
+        auc_means,
+        color=auc_colors[: len(models)],
+        edgecolor="white",
+        linewidth=0.8,
+    )
     axes[1].set_title("Ranking quality")
     axes[1].set_ylabel("Test ROC-AUC")
-    axes[1].set_ylim(0.0, 1.02)
+    axes[1].set_ylim(0.84, 0.98)
     axes[1].set_xticks(x)
-    axes[1].set_xticklabels(models, rotation=15, ha="right")
+    axes[1].set_xticklabels(labels)
     axes[1].grid(True, axis="y", alpha=0.25)
+    for bar, value in zip(bars_auc, auc_means):
+        axes[1].text(
+            bar.get_x() + bar.get_width() / 2,
+            value + 0.005,
+            f"{value:.3f}",
+            ha="center",
+            va="bottom",
+            fontsize=8,
+        )
 
-    fig.suptitle("Logistic ablation: linear features vs random features vs evolved features")
-    fig.savefig(output_path, dpi=180)
+    fig.suptitle(
+        "Binary logistic ablation: contribution of the hidden representation",
+        y=1.03,
+    )
+    fig.savefig(output_path, dpi=180, bbox_inches="tight")
     plt.close(fig)
 
 
@@ -621,7 +677,7 @@ def save_ranking_plot(ranks: dict[str, object], output_path: Path) -> None:
     models = sorted(ranks, key=lambda model: ranks[model]["mean"])
     means = [ranks[model]["mean"] for model in models]
     stds = [ranks[model]["std"] for model in models]
-    colors = ["#2f6f9f" if model in LOGISTIC_MODELS else "#b36b2c" for model in models]
+    colors = ["#0072B2" if model in LOGISTIC_MODELS else "#E69F00" for model in models]
     fig, ax = plt.subplots(figsize=(11.5, 5.2), constrained_layout=True)
     ax.bar(np.arange(len(models)), means, yerr=stds, capsize=3, color=colors)
     ax.set_title("Mean test-accuracy rank across dataset/seed pairs")

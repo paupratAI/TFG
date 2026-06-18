@@ -630,7 +630,7 @@ def save_model_comparison_plot(results: list[dict[str, object]], output_path: Pa
 
     fig, ax = plt.subplots(figsize=(6.8, 4.6), constrained_layout=True)
     x = np.arange(len(models))
-    colors = ["#8c8c8c", "#f0c08a", "#1f77b4"]
+    colors = ["#7F7F7F", "#F5D7A1", "#0072B2"]
     bars = ax.bar(x, values, color=colors, edgecolor="white")
     ax.set_title("Mean test accuracy across multiclass datasets")
     ax.set_ylabel("Accuracy (higher is better)")
@@ -659,12 +659,13 @@ def save_representation_value_plot(results: list[dict[str, object]], output_path
     x = np.arange(len(datasets))
     width = 0.22
     fig, ax = plt.subplots(figsize=(11.5, 5.2), constrained_layout=True)
-    for offset, model in zip([-width, 0.0, width], models):
+    colors = ["#7F7F7F", "#F5D7A1", "#0072B2"]
+    for i, (offset, model) in enumerate(zip([-width, 0.0, width], models)):
         values = []
         for result in results:
             rows_by_model = {row["model"]: row for row in result["rows"]}
             values.append(float(rows_by_model[model]["test_accuracy"]))
-        ax.bar(x + offset, values, width, label=model)
+        ax.bar(x + offset, values, width, label=model, color=colors[i], edgecolor="white")
     ax.set_ylim(0.0, 1.05)
     ax.set_title("Value of evolved hidden representation with softmax output")
     ax.set_ylabel("Test accuracy")

@@ -586,7 +586,7 @@ def save_model_comparison_plot(results: list[dict[str, object]], output_path: Pa
 
     fig, ax = plt.subplots(figsize=(6.8, 4.6), constrained_layout=True)
     x = np.arange(len(models))
-    colors = ["#8c8c8c", "#f0c08a", "#1f77b4"]
+    colors = ["#7F7F7F", "#F5D7A1", "#0072B2"]
     bars = ax.bar(x, values, color=colors, edgecolor="white")
     ax.axhline(1.0, color="#2f2f2f", linewidth=1.0, linestyle="--", alpha=0.8)
     ax.set_title("Mean normalised test RMSE across regression datasets")
