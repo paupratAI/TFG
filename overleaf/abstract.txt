@@ -5,3 +5,27 @@ Once the hidden activations are fixed, the output layer is fitted separately. Th
 
 The evaluation compares neuron-selection strategies, standard tabular baselines, logistic and Ridge ablations, regression variants, sparse logistic output filtering, multiclass softmax models, and a Michigan-versus-Pittsburgh evolutionary benchmark. The results do not show universal superiority over all classical models. They do, however, support the main hypothesis of the work: in the tested settings, evolving individual hidden neurons can produce a useful hidden representation and can offer a favourable accuracy-time trade-off compared with evolving complete neural networks.
 \end{abstract}
+
+\newpage
+% Resum en català
+\begingroup
+\renewcommand{\abstractname}{Resum}
+\begin{abstract}
+Les xarxes neuronals combinades amb Estratègies Evolutives poden donar lloc a dinàmiques d'entrenament molt diferents de l'aprenentatge estàndard basat en gradients i, en alguns casos, poden proporcionar alternatives útils per a problemes de regressió o classificació. Aquest treball desenvolupa aquesta idea d'una manera específica: en lloc d'utilitzar una població evolutiva en què cada individu representa una xarxa neuronal completa, la població s'utilitza per representar una única xarxa. El prototip proposat és un Perceptró Multicapa amb una sola capa oculta entrenat mitjançant una Estratègia Evolutiva d'estil Michigan, en què cada individu representa una neurona oculta. Les neurones parentals i els descendents mutats formen un conjunt candidat; una estratègia de fitness a nivell de neurona selecciona les neurones supervivents, i la població seleccionada esdevé la capa oculta.
+
+Un cop fixades les activacions ocultes, la capa de sortida s'ajusta per separat. L'avaluació final manté el model de sortida alineat amb la tasca: la classificació binària utilitza una sortida logística sense regularització entrenada amb entropia creuada, la regressió utilitza regressió Ridge amb Validació Creuada Generalitzada, i la classificació multiclasse utilitza una sortida softmax. Això separa la cerca evolutiva de característiques ocultes no lineals de l'ajust supervisat del predictor final.
+
+L'avaluació compara estratègies de selecció de neurones, baselines estàndard per a dades tabulars, ablations logístiques i Ridge, variants de regressió, filtratge dispers de la capa de sortida logística, models softmax multiclasse i un benchmark evolutiu Michigan versus Pittsburgh. Els resultats no mostren una superioritat universal respecte de tots els models clàssics. Tanmateix, donen suport a la hipòtesi principal del treball: en les configuracions avaluades, evolucionar neurones ocultes individuals pot produir una representació oculta útil i oferir una relació favorable entre precisió i temps de càlcul en comparació amb l'evolució de xarxes neuronals completes.
+\end{abstract}
+
+\newpage
+% Resumen en castellano
+\begingroup
+\renewcommand{\abstractname}{Resumen}
+\begin{abstract}
+Las redes neuronales combinadas con Estrategias Evolutivas pueden dar lugar a dinámicas de entrenamiento muy diferentes del aprendizaje estándar basado en gradientes y, en algunos casos, pueden proporcionar alternativas útiles para problemas de regresión o clasificación. Este trabajo desarrolla esta idea de una forma específica: en lugar de utilizar una población evolutiva en la que cada individuo representa una red neuronal completa, la población se utiliza para representar una única red. El prototipo propuesto es un Perceptrón Multicapa de una sola capa oculta entrenado mediante una Estrategia Evolutiva de estilo Michigan, en la que cada individuo representa una neurona oculta. Las neuronas parentales y los descendientes mutados forman un conjunto candidato; una estrategia de fitness a nivel de neurona selecciona las neuronas supervivientes, y la población seleccionada pasa a constituir la capa oculta.
+
+Una vez fijadas las activaciones ocultas, la capa de salida se ajusta por separado. La evaluación final mantiene el modelo de salida alineado con la tarea: la clasificación binaria utiliza una salida logística no regularizada entrenada con entropía cruzada, la regresión utiliza regresión Ridge con Validación Cruzada Generalizada y la clasificación multiclase utiliza una salida softmax. Esto separa la búsqueda evolutiva de características ocultas no lineales del ajuste supervisado del predictor final.
+
+La evaluación compara estrategias de selección de neuronas, baselines estándar para datos tabulares, ablaciones logísticas y Ridge, variantes de regresión, filtrado disperso de la capa de salida logística, modelos softmax multiclase y un benchmark evolutivo Michigan frente a Pittsburgh. Los resultados no muestran una superioridad universal sobre todos los modelos clásicos. Sin embargo, respaldan la hipótesis principal del trabajo: en las configuraciones evaluadas, evolucionar neuronas ocultas individuales puede producir una representación oculta útil y ofrecer un compromiso favorable entre precisión y tiempo de ejecución en comparación con la evolución de redes neuronales completas.
+\end{abstract}

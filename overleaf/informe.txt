@@ -491,6 +491,79 @@ regularisation values, and output coefficients. The prototype is therefore
 suitable for a final-degree project: it is complex enough to raise real
 research questions, but compact enough to understand and evaluate carefully.
 
+\subsection{Cooperative Coevolution}
+\label{subsec:sota_cooperative_coevolution}
+
+Cooperative coevolution provides a useful historical perspective on the
+representation studied in this thesis. In a cooperative formulation, an
+individual does not encode a complete solution. Instead, it encodes one
+component of a solution that must be combined with other components before the
+system can be evaluated meaningfully. Selection therefore cannot rely only on
+the isolated quality of each component. It must also determine whether the
+component contributes positively when it cooperates with the rest of the
+population.
+
+This idea is closely related to the distinction between Michigan and
+Pittsburgh representations in learning classifier systems. In the Michigan
+organisation associated with Holland, the population contains partial rules
+that collectively define one adaptive system. The credit-assignment problem is
+therefore central: a rule may be useful because it participates in a successful
+sequence of decisions, even if it is not useful in isolation. Holland's bucket
+brigade mechanism was an early attempt to distribute reinforcement across
+cooperating rules and to assign credit within a population-based solution
+\cite{holland1986}. In contrast, the Pittsburgh organisation associated with
+Smith represents a complete rule set as one individual, allowing ordinary
+selection to compare complete candidate solutions directly
+\cite{smith1980}.
+
+Although these terms originated in rule-based learning classifier systems,
+the same distinction transfers naturally to neural networks. Standard
+neuroevolution is often Pittsburgh-style because each individual encodes a
+complete network and can therefore receive a direct model-level fitness value.
+A cooperative neural representation instead decomposes the network into
+components. The population then becomes part of a single network rather than a
+collection of independent candidate networks.
+
+A particularly relevant neural example is Symbiotic, Adaptive Neuro-Evolution
+(SANE). SANE evolves a population of neuron encodings and repeatedly assembles
+complete neural networks from subsets of those neurons. A neuron's fitness is
+derived from the performance of the networks in which it participates, so
+neurons that cooperate well with different partners are favoured
+\cite{moriarty1997}. This makes SANE an important precedent for the idea that
+a population of neuron-level components can collectively represent one neural
+model. However, its credit assignment is based on the performance of sampled
+complete networks rather than on an explicit feature-selection criterion over
+hidden activation columns.
+
+Cooperative Synapse Neuroevolution (CoSyNE) applies the same general principle
+at an even finer level of decomposition. Instead of treating a neuron as the
+main evolutionary component, CoSyNE uses cooperative coevolution at the level
+of individual synaptic weights \cite{gomez2008}. This shows that a neural
+network can be decomposed into multiple interacting evolutionary units, but it
+also makes the credit-assignment problem more indirect because the contribution
+of one weight depends on many other weights in the assembled network.
+
+The method proposed in this thesis is related to these cooperative approaches,
+but it is not a direct implementation of either SANE or CoSyNE. Like SANE, it
+uses a population of hidden-neuron components whose selected members form one
+hidden layer. Unlike SANE, it does not estimate neuron fitness by averaging the
+performance of randomly assembled complete networks. Instead, each candidate
+neuron produces an activation column on the training data, and the method uses
+explicit selection criteria to identify neurons that are relevant to the target
+and complementary to the neurons already selected. The implementation also
+uses an Evolution Strategy with self-adaptive mutation rather than the
+genetic-algorithm operators used in the classical cooperative neuroevolution
+methods.
+
+The proposed architecture can therefore be understood as a Michigan-style
+cooperative feature-construction method driven by Evolution Strategies. The
+population is not a set of alternative classifiers: it is the evolving hidden
+representation of one MLP. The output layer is subsequently fitted with the
+supervised model appropriate to the task. This interpretation clarifies why
+credit assignment is the central methodological issue of the thesis and
+motivates the cooperative selection mechanisms discussed in
+Section~\ref{subsec:sota_credit_assignment}.
+
 \subsection{Representation as a Central Design Choice}
 \label{subsec:sota_representation_choice}
 

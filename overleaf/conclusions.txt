@@ -138,6 +138,7 @@ representation can be combined with a one-hidden-layer MLP and task-specific
 output fitting, and that this combination can offer a meaningful
 accuracy-time trade-off compared with evolving complete neural networks.
 
+\newpage
 \begin{thebibliography}{99}
 
 \bibitem{bishop2006prml}
@@ -265,5 +266,36 @@ Robert Tibshirani.
 Joaquin Vanschoren, Jan N. van Rijn, Bernd Bischl, and Luis Torgo.
 \newblock OpenML: Networked science in machine learning.
 \newblock \emph{SIGKDD Explorations}, 15(2):49--60, 2013.
+
+\bibitem{holland1986}
+John H. Holland.
+\newblock Escaping brittleness: The possibilities of general-purpose learning
+algorithms applied to parallel rule-based systems.
+\newblock In Ryszard S. Michalski, Jaime G. Carbonell, and Tom M. Mitchell,
+editors, \emph{Machine Learning: An Artificial Intelligence Approach},
+volume 2, pages 593--623. Morgan Kaufmann, Los Altos, CA, 1986.
+
+\bibitem{smith1980}
+Stephen F. Smith.
+\newblock \emph{A Learning System Based on Genetic Adaptive Algorithms}.
+\newblock PhD thesis, University of Pittsburgh, Pittsburgh, PA, 1980.
+
+\bibitem{such2017}
+Felipe Petroski Such, Vashisht Madhavan, Edoardo Conti, Joel Lehman,
+Kenneth O. Stanley, and Jeff Clune.
+\newblock Deep neuroevolution: Genetic algorithms are a competitive
+alternative for training deep neural networks for reinforcement learning.
+\newblock arXiv preprint arXiv:1712.06567, 2017.
+
+\bibitem{moriarty1997}
+David E. Moriarty and Risto Miikkulainen.
+\newblock Forming neural networks through efficient and adaptive coevolution.
+\newblock \emph{Evolutionary Computation}, 5(4):373--399, 1997.
+
+\bibitem{gomez2008}
+Faustino Gomez, J"urgen Schmidhuber, and Risto Miikkulainen.
+\newblock Accelerated neural evolution through cooperatively coevolved
+synapses.
+\newblock \emph{Journal of Machine Learning Research}, 9:937--965, 2008.
 
 \end{thebibliography}

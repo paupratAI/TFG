@@ -196,45 +196,43 @@ experimental protocol, and compares the final method against relevant
 alternatives. Negative and mixed results are kept in the discussion because
 they help define what the method can and cannot support.
 
-\subsection{Acronyms Used in the Thesis}
-\label{subsec:intro_acronyms}
+%\subsection{Acronyms Used in the Thesis}
+%\label{subsec:intro_acronyms}
 
-Before moving into the technical background, Table~\ref{tab:acronyms}
-summarises the main acronyms used throughout the thesis. The table is included
-only as a quick reference; the most important concepts are explained in more
-detail in the following sections.
+%Before moving into the technical background, Table~\ref{tab:acronyms} summarises the main acronyms used throughout the thesis. The table is included only as a quick reference; the most important concepts are explained in more detail in the following sections.
 
-\begin{table}[htbp]
-\centering
-\footnotesize
-\caption{Main acronyms used throughout the thesis.}
-\label{tab:acronyms}
-\resizebox{\textwidth}{!}{%
-\begin{tabular}{@{}lll@{}}
-\toprule
-Acronym & Meaning & Context \
-\midrule
-MLP & Multilayer Perceptron & Neural model \
-NN & Neural Network & General model family \
-BP & Backpropagation & Gradient-based training \
-EA & Evolutionary Algorithm & Population-based optimisation \
-GA & Genetic Algorithm & Evolutionary computation \
-ES & Evolution Strategy & Evolutionary computation \
-CMA-ES & Covariance Matrix Adaptation Evolution Strategy & Advanced ES variant \
-NES & Natural Evolution Strategies & Advanced ES variant \
-ELM & Extreme Learning Machine & Random-feature neural model \
-CFS & Correlation-based Feature Selection & Neuron fitness strategy \
-CFS-AUC & CFS with AUC relevance & Neuron fitness strategy \
-OMP & Orthogonal Matching Pursuit & Neuron fitness strategy \
-AUC & Area Under the ROC Curve & Classification metric \
-ROC & Receiver Operating Characteristic & Classification analysis \
-GCV & Generalised Cross-Validation & Ridge output fitting \
-CE & Cross-Entropy & Classification loss \
-RMSE & Root Mean Squared Error & Regression metric \
-MAE & Mean Absolute Error & Regression metric \
-ECE & Expected Calibration Error & Probability calibration \
-SVD & Singular Value Decomposition & Ridge/GCV computation \
-\bottomrule
-\end{tabular}%
-}
-\end{table}
+
+%\begin{table}[htbp]
+%\centering
+%\footnotesize
+%\caption{Main acronyms used throughout the thesis.}
+%\label{tab:acronyms}
+%\resizebox{\textwidth}{!}{%
+%\begin{tabular}{@{}lll@{}}
+%\toprule
+%Acronym & Meaning & Context \
+%\midrule
+%MLP & Multilayer Perceptron & Neural model \
+%NN & Neural Network & General model family \
+%BP & Backpropagation & Gradient-based training \
+%EA & Evolutionary Algorithm & Population-based optimisation \
+%GA & Genetic Algorithm & Evolutionary computation \
+%ES & Evolution Strategy & Evolutionary computation \
+%CMA-ES & Covariance Matrix Adaptation Evolution Strategy & %Advanced ES variant \
+%NES & Natural Evolution Strategies & Advanced ES variant \
+%ELM & Extreme Learning Machine & Random-feature neural model \
+%CFS & Correlation-based Feature Selection & Neuron selection %strategy \
+%CFS-AUC & CFS with AUC relevance & Neuron selection strategy \
+%OMP & Orthogonal Matching Pursuit & Neuron selection strategy \
+%AUC & Area Under the ROC Curve & Classification metric \
+%ROC & Receiver Operating Characteristic & Classification %analysis \
+%GCV & Generalised Cross-Validation & Ridge output fitting \
+%CE & Cross-Entropy & Classification loss \
+%RMSE & Root Mean Squared Error & Regression metric \
+%MAE & Mean Absolute Error & Regression metric \
+%ECE & Expected Calibration Error & Probability calibration \
+%%SVD & Singular Value Decomposition & Ridge/GCV computation \
+%\bottomrule
+%\end{tabular}%
+%}
+%\end{table}
