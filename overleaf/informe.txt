@@ -322,23 +322,49 @@ will cooperate well inside the final hidden layer.
 \label{subsec:background_feature_selection}
 
 The Michigan representation turns hidden-neuron survival into a feature
-selection problem. Each candidate neuron produces one activation column. The
-algorithm must select a subset of columns that is useful for prediction and
-not excessively redundant. The project therefore uses ideas from feature
-selection and sparse approximation.
+selection problem. This connection is important for understanding the whole
+prototype. Once a candidate hidden neuron is applied to all training samples,
+it produces a vector of activations. In matrix form, this vector is one column
+of the hidden activation matrix. Selecting hidden neurons is therefore similar
+to selecting columns in a transformed feature space: the original input
+variables are first passed through many nonlinear tanh neurons, and the method
+must decide which of those generated features should remain in the final
+hidden layer.
 
+This view also clarifies why credit assignment is difficult. A good hidden
+layer should contain neurons that are relevant to the target, but relevance
+alone is not enough. If ten neurons produce almost the same activation pattern,
+keeping all of them wastes capacity and gives the output layer little new
+information. Conversely, a neuron with a moderate individual score may be
+valuable if it explains a part of the target that the already selected neurons
+miss. The selection problem is therefore not simply to rank neurons one by one.
+It is to build a cooperative subset that is both predictive and diverse enough
+to support the output model.
+
+The feature-selection analogy gives practical tools for this problem.
 Orthogonal Matching Pursuit (OMP) is a greedy method that selects variables
 according to how much they explain the current residual~\cite{pati1993omp}.
-Correlation-based Feature Selection (CFS) selects subsets that are highly
-correlated with the target but weakly correlated with each other
-\cite{hall1999cfs}. Lasso adds another kind of selection by using an
-$\ell_1$ penalty that can set coefficients exactly to zero
-\cite{tibshirani1996lasso}.
+In this thesis, this means that a neuron is valuable if its activation column
+helps explain what the current selected subset still fails to model.
+Correlation-based Feature Selection (CFS) follows a different logic: it
+favours subsets whose members are strongly related to the target but weakly
+related to each other~\cite{hall1999cfs}. This matches the idea that hidden
+neurons should be individually useful but not redundant. Lasso adds another
+kind of selection by using an $\ell_1$ penalty that can set coefficients
+exactly to zero~\cite{tibshirani1996lasso}. In that case, selection happens
+through the fitted output coefficients rather than through the evolutionary
+survival step itself.
 
-These ideas are not used as generic preprocessing. They are integrated into
-the model. $R^2$, OMP, CFS, and CFS-AUC are alternative ways of deciding which
-evolved neurons survive each generation. L1-logistic filtering is later tested
-as a second filter after the ES has already selected the hidden layer.
+These ideas are not used as generic preprocessing before the neural model.
+They are part of the model's training mechanism. At each generation, the ES
+creates a parent-plus-offspring pool of candidate neurons. The selected
+fitness strategy then chooses which activation columns survive and form the
+next hidden layer. In this sense, $R^2$, OMP, CFS, and CFS-AUC are alternative
+answers to the same credit-assignment question: which individual neurons
+deserve to remain because they help the population behave like a good hidden
+representation? L1-logistic filtering is later tested as a second filter after
+the ES has already selected the hidden layer, so it is complementary rather
+than a replacement for the neuron-level selection step.
 
 \subsection{Evolution Strategies}
 \label{subsec:background_es}
@@ -498,9 +524,7 @@ Cooperative coevolution provides a useful historical perspective on the
 representation studied in this thesis. In a cooperative formulation, an
 individual does not encode a complete solution. Instead, it encodes one
 component of a solution that must be combined with other components before the
-system can be evaluated meaningfully. Selection therefore cannot rely only on
-the isolated quality of each component. It must also determine whether the
-component contributes positively when it cooperates with the rest of the
+system can be evaluated meaningfully. Therefore, selection cannot rely only on the individual quality of each component. It must also determine whether the component contributes positively when it cooperates with the rest of the
 population.
 
 This idea is closely related to the distinction between Michigan and

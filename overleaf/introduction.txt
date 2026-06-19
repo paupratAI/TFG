@@ -196,43 +196,41 @@ experimental protocol, and compares the final method against relevant
 alternatives. Negative and mixed results are kept in the discussion because
 they help define what the method can and cannot support.
 
-%\subsection{Acronyms Used in the Thesis}
-%\label{subsec:intro_acronyms}
+\subsection{Acronyms and Abbreviations}
+\label{subsec:intro_acronyms}
 
-%Before moving into the technical background, Table~\ref{tab:acronyms} summarises the main acronyms used throughout the thesis. The table is included only as a quick reference; the most important concepts are explained in more detail in the following sections.
+Several acronyms are used throughout the thesis. Most of them are introduced
+again when they first become technically important, but Table~\ref{tab:intro_acronyms}
+is included as a quick reference for the reader.
 
-
-%\begin{table}[htbp]
-%\centering
-%\footnotesize
-%\caption{Main acronyms used throughout the thesis.}
-%\label{tab:acronyms}
-%\resizebox{\textwidth}{!}{%
-%\begin{tabular}{@{}lll@{}}
-%\toprule
-%Acronym & Meaning & Context \
-%\midrule
-%MLP & Multilayer Perceptron & Neural model \
-%NN & Neural Network & General model family \
-%BP & Backpropagation & Gradient-based training \
-%EA & Evolutionary Algorithm & Population-based optimisation \
-%GA & Genetic Algorithm & Evolutionary computation \
-%ES & Evolution Strategy & Evolutionary computation \
-%CMA-ES & Covariance Matrix Adaptation Evolution Strategy & %Advanced ES variant \
-%NES & Natural Evolution Strategies & Advanced ES variant \
-%ELM & Extreme Learning Machine & Random-feature neural model \
-%CFS & Correlation-based Feature Selection & Neuron selection %strategy \
-%CFS-AUC & CFS with AUC relevance & Neuron selection strategy \
-%OMP & Orthogonal Matching Pursuit & Neuron selection strategy \
-%AUC & Area Under the ROC Curve & Classification metric \
-%ROC & Receiver Operating Characteristic & Classification %analysis \
-%GCV & Generalised Cross-Validation & Ridge output fitting \
-%CE & Cross-Entropy & Classification loss \
-%RMSE & Root Mean Squared Error & Regression metric \
-%MAE & Mean Absolute Error & Regression metric \
-%ECE & Expected Calibration Error & Probability calibration \
-%%SVD & Singular Value Decomposition & Ridge/GCV computation \
-%\bottomrule
-%\end{tabular}%
-%}
-%\end{table}
+\begin{table}[htbp]
+\centering
+\caption{Main acronyms and abbreviations used in the thesis.}
+\label{tab:intro_acronyms}
+\resizebox{\textwidth}{!}{%
+\begin{tabular}{lll}
+\toprule
+Acronym & Meaning & Context \\
+\midrule
+MLP & Multilayer Perceptron & Background, proposed architecture, and experiments. \\
+GA & Genetic Algorithm & Background and state-of-the-art discussion. \\
+ES & Evolution Strategy & Background and proposed training algorithm. \\
+ES-MLP & Evolution-Strategy MLP & Proposed method and architecture summary. \\
+ES-CFS & ES with CFS selection & Binary classification experiments and main Michigan model. \\
+CFS & Correlation-based Feature Selection & Fitness strategy design and selection-strategy experiments. \\
+CFS-AUC & CFS with AUC relevance & Alternative fitness strategy in method and experiments. \\
+OMP & Orthogonal Matching Pursuit & Fitness strategy design and regression experiments. \\
+$R^2$ & Coefficient of determination & Regression metric and selection-strategy discussion. \\
+GCV & Generalised Cross-Validation & Ridge output layer and regression experiments. \\
+SVD & Singular Value Decomposition & Ridge/GCV solver in the proposed method. \\
+CE & Cross-Entropy & Logistic and softmax output layers. \\
+AUC / ROC-AUC & Area under the ROC curve & Binary ranking metric in the experiments. \\
+RMSE & Root Mean Squared Error & Regression benchmark. \\
+MAE & Mean Absolute Error & Regression benchmark. \\
+ECE & Expected Calibration Error & Probability-quality metrics in classification. \\
+SVM / RBF SVM & Support Vector Machine / RBF-kernel SVM & Binary benchmark baselines. \\
+L1 & Lasso-style absolute-value penalty & Sparse logistic output filtering experiment. \\
+\bottomrule
+\end{tabular}%
+}
+\end{table}
