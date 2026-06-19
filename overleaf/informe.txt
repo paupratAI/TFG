@@ -510,8 +510,7 @@ population representation all changed at the same time, it would be difficult
 to identify which design choice caused the result.
 
 The method is also smaller in scale than many modern neuroevolution systems.
-That is a limitation, but also an advantage for analysis. Because the network
-has one hidden layer and the output layer is fitted analytically, the behaviour
+That is a limitation, but also an advantage for analysis. Because the network has one hidden layer and the output layer is fitted separately, the behaviour
 of the system can be inspected through activation matrices, selected neurons,
 regularisation values, and output coefficients. The prototype is therefore
 suitable for a final-degree project: it is complex enough to raise real
@@ -1340,6 +1339,26 @@ the target, but not redundant with each other. In other words, it evaluates
 the quality of a subset rather than only the quality of isolated neurons.
 For that reason, CFS is a natural candidate for a Michigan-style hidden layer.
 
+For multiclass softmax experiments, relevance is not computed directly from
+the numerical class indices. Instead, each class is represented by a
+one-versus-rest indicator. For neuron $i$, the multiclass relevance is
+
+\[
+r_{cf}^{\mathrm{MC}}(i)
+=
+\frac{1}{K}
+\sum_{k=1}^{K}
+\operatorname{corr}
+\left(
+\boldsymbol{\phi}_i,
+\mathbb{1}[y=k]
+\right)^2.
+\]
+
+The redundancy term remains the squared Pearson correlation between neuron
+activation columns. This makes CFS selection invariant to the arbitrary
+numerical ordering of class labels.
+
 \subsubsection{CFS-AUC.}
 CFS-AUC was the final variation considered in this sequence. The motivation
 was that the final binary classifier is logistic, and Pearson correlation is
@@ -1495,11 +1514,7 @@ GCV.
 \subsection{Training Algorithm}
 \label{subsec:method_algorithm}
 
-The following pseudocode describes the training procedure at a high level.
-The hidden-layer search is the same across tasks; only the output layer and
-the validation metric change.
-
-\begin{algorithm}[htbp]
+\begin{algorithm}[H]
 \small
 \caption{Training procedure of the proposed Michigan-style ES-MLP.}
 \label{alg:training_pseudocode}
@@ -1525,18 +1540,20 @@ $best \leftarrow \emptyset$\;
     Apply the elitism safeguard for strong parent neurons\;
     $\{\boldsymbol{\alpha}_i,\mathbf{L}_i\}_{i=1}^{\mu} \leftarrow \mathcal{P}[I_{sel}]$\;
     $\widetilde{\boldsymbol{\Phi}}_{tr} \leftarrow [\boldsymbol{\Phi}_{\mathcal{P}}[:,I_{sel}] \mid \mathbf{1}]$\;
+    Construct $\widetilde{\boldsymbol{\Phi}}_{val}$ from the selected neurons on
+$\mathbf{X}_{val}$ and append a bias column\;
     \uIf{$q$ is binary classification}{
         Fit unregularised logistic output and obtain $\boldsymbol{\theta}=\boldsymbol{\beta}$\;
-        Evaluate accuracy, cross-entropy, ROC-AUC, Brier score, and ECE\;
+        Evaluate validation accuracy, cross-entropy, ROC-AUC, Brier score, and ECE\;
     }
     \uElseIf{$q$ is regression}{
         Compute one SVD of $\widetilde{\boldsymbol{\Phi}}_{tr}$\;
         Select $\lambda_R$ by GCV and recover $\boldsymbol{\theta}=\boldsymbol{\beta}$\;
-        Evaluate RMSE, MAE, $R^2$, and GCV\;
+        Evaluate validation RMSE, MAE, $R^2$, and GCV\;
     }
     \Else{
         Fit softmax output and obtain $\boldsymbol{\theta}=\mathbf{B}$\;
-        Evaluate accuracy, macro-F1, cross-entropy, and ECE\;
+        Evaluate validation accuracy, macro-F1, cross-entropy, and ECE\;
     }
     \If{validation metric improves}{
         $best \leftarrow (\boldsymbol{\alpha}, \mathbf{L}, \boldsymbol{\theta}, t)$\;
@@ -1551,6 +1568,10 @@ $best \leftarrow \emptyset$\;
 Evaluate the selected model once on the test split\;
 \textbf{return} selected neurons, output weights, preprocessing state, and metrics\;
 \end{algorithm}
+
+The pseudocode describes the training procedure at a high level.
+The hidden-layer search is the same across tasks; only the output layer and
+the validation metric change.
 
 The algorithm separates the two roles of the prototype. The evolutionary part
 searches for a cooperative set of hidden neurons, while the output layer is
@@ -1577,6 +1598,7 @@ constant of self-adaptive ES.
 After training, the model stores the fitted preprocessing state, the selected
 hidden-neuron genotypes, and the fitted output weights. Prediction only needs
 these elements. The mutation matrices are not used during inference.
+
 
 \begin{algorithm}[htbp]
 \small

@@ -13,21 +13,23 @@ regression, and softmax cross-entropy for multiclass classification.
 \subsection{Assessment of the Objectives}
 \label{subsec:conclusions_objectives}
 
-The first objective was to implement a single-hidden-layer neural network in
+The \textbf{first objective} was to implement a single-hidden-layer neural network in
 which the hidden neurons are evolved with a Michigan-style Evolution Strategy.
 This part of the work was completed. The final prototype defines each
 individual as one tanh hidden neuron with its own genotype and self-adaptive
 mutation matrix. The population collectively forms the hidden layer, and the
 output layer is fitted after selection.
 
-The second objective was to study credit assignment in this representation.
+The \textbf{second objective} was to study credit assignment in this representation.
 This was also addressed experimentally. Four selection strategies were
 implemented and compared: OMP residual selection, marginal $R^2$ with
 diversity penalty, CFS, and CFS-AUC. The experiments show that the selection
 criterion has a large effect on performance. CFS is the strongest overall
 strategy in the main binary logistic benchmark.
 
-The third objective was to evaluate the binary logistic architecture against
+The \textbf{third objective} was to establish a task-consistent output formulation once the hidden layer had been selected. This was completed: the final prototype uses logistic cross-entropy for binary classification, Ridge/GCV for regression, and softmax cross-entropy for multiclass classification.
+
+The \textbf{fourth objective} was to evaluate the binary logistic architecture against
 standard baselines and ablations. The outcome is balanced rather than
 one-sided. ES-CFS Logistic CE improves over the linear logistic and random tanh
 logistic ablations, which supports the value of the evolved representation.
@@ -37,7 +39,7 @@ datasets. The conclusion is therefore not that the prototype dominates
 classical models, but that the Michigan representation adds measurable value
 inside the logistic neural architecture.
 
-The fourth objective was to test related extensions. This was only partially
+The \textbf{fifth objective} was to test related extensions. This was only partially
 covered, but the results are still useful. The regression benchmark shows that
 the evolved representation improves a closed-form Ridge/GCV output model over
 linear and random-feature Ridge variants in the tested regression settings.
@@ -48,7 +50,7 @@ representation can also be used in multiclass probabilistic classification.
 These extensions are not exhaustive benchmark studies, but they add clear
 value to the project.
 
-The fifth objective was to compare the Michigan representation with a
+The \textbf{sixth objective} was to compare the Michigan representation with a
 Pittsburgh-style evolutionary representation. The final experiment addresses
 this objective directly. Against full-network Pittsburgh evolution, Michigan
 ES-CFS obtains higher test accuracy and ROC-AUC, a smaller validation-test
@@ -92,8 +94,7 @@ defensible.
 
 The clearest limitation is the scale of the evaluation. The experiments are
 reproducible and cover several directions, but they are still small compared
-with a full benchmark study. More datasets, more seeds, and paired
-statistical tests would be needed before making broad claims.
+with a full benchmark study. More datasets and more seeds would be needed before making broad claims.
 
 A second limitation is experimental scope. Regression, sparse logistic
 filtering, and softmax are evaluated as targeted extensions rather than as a
@@ -293,14 +294,10 @@ David E. Moriarty and Risto Miikkulainen.
 \newblock \emph{Evolutionary Computation}, 5(4):373--399, 1997.
 
 \bibitem{gomez2008}
-Faustino Gomez, J"urgen Schmidhuber, and Risto Miikkulainen.
+Faustino Gomez, J{\"u}rgen Schmidhuber, and Risto Miikkulainen.
 \newblock Accelerated neural evolution through cooperatively coevolved
 synapses.
 \newblock \emph{Journal of Machine Learning Research}, 9:937--965, 2008.
 
-\bibitem{wilcoxon1945}
-Frank Wilcoxon.
-\newblock Individual comparisons by ranking methods.
-\newblock \emph{Biometrics Bulletin}, 1(6):80--83, 1945.
 
 \end{thebibliography}

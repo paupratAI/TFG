@@ -89,9 +89,10 @@ ROC-AUC is included because logistic and softmax outputs produce continuous
 probabilities or scores that can be ranked. Cross-entropy and Brier score
 measure probability quality, while ECE gives a simple calibration diagnostic.
 Runtime is reported as fitting time, but its interpretation differs between
-classical baselines and the evolutionary prototype. For that reason, the most
-meaningful runtime result is the Michigan--Pittsburgh experiment, where both
-methods are evolutionary neural models and share the same output solver.
+classical baselines and the evolutionary prototype. For that reason, the Michigan--Pittsburgh experiments provide the most direct
+runtime comparison. The matched-budget variant shares the same logistic output
+solver, whereas the full-network Pittsburgh baseline evolves its output weights
+as part of each individual.
 
 \subsection{Results and Discussion}
 \label{subsec:experiments_results_discussion}
@@ -165,12 +166,12 @@ for the other strategies to about $3.194$ s. CFS-AUC would therefore need a
 clear predictive gain to justify its cost, which is not observed in this
 experiment.
 
-The per-dataset results give more nuance. Table~\ref{tab:strategy_per_dataset}
-shows that CFS is especially strong on Ionosphere and Sonar, while CFS-AUC is
-very strong on Breast-W. This is consistent with the nature of the
-selection criteria. CFS-AUC directly rewards ranking quality, which works well
-when individual neurons can separate the classes reliably. CFS is more
-balanced when redundancy between neurons becomes important.
+The per-dataset results are heterogeneous. CFS obtains the highest ROC-AUC on
+Ionosphere and ties with $R^2$ in mean test accuracy there. On Breast-W, OMP
+has the highest test accuracy and ROC-AUC. On Sonar, OMP has the highest test
+accuracy, lowest cross-entropy, and highest ROC-AUC, while CFS-AUC has the
+highest validation accuracy. Therefore, CFS is selected as the default because
+of its aggregate result across datasets and metrics.
 
 \begin{table}[htbp]
 \centering
@@ -621,11 +622,9 @@ L1-screened ES-CFS Logistic CE & $\mathbf{0.926}\pm0.011$ & $0.891\pm0.016$ & $0
 
 The result is valuable because it is not a trivial compression failure. Direct
 L1-logistic slightly improves mean test accuracy and ROC-AUC over the full
-logistic output while using only 18.47 active neurons on average. More
-importantly, its mean test cross-entropy drops from $1.759$ to $0.452$. This
-shows that the L1 penalty is not only making the model smaller; it is also
-reducing the overconfident probabilities produced by the unregularised full
-logistic output. The screened variant is also informative: it obtains the best
+logistic output while using only 18.47 active neurons on average. This shows that the L1 penalty is not only making the model smaller; it also
+maintains, and slightly improves, the reported test accuracy and ROC-AUC while
+substantially reducing the number of active hidden neurons. The screened variant is also informative: it obtains the best
 mean validation accuracy and the sparsest model, but its mean test accuracy is
 slightly below the direct L1 output. This suggests that, in this setting, L1 is
 more useful when its shrinkage remains part of the final classifier than when
@@ -678,6 +677,13 @@ The benchmark uses Digits, GaussianQuantiles-3000, and Spiral3-3000. Digits is
 a real 10-class dataset. The two synthetic datasets are nonlinear 3-class
 problems designed to test whether the hidden representation can make softmax
 classification easier.
+
+Each multiclass result corresponds to one stratified train/validation/test
+split with seed $42$. The ES uses $30$ generations, $50$ surviving neurons,
+and $250$ offspring neurons per generation. The selected checkpoint is the
+generation with the highest validation accuracy, using validation
+cross-entropy as tie-breaker. Therefore, Table~\ref{tab:softmax_results}
+reports single-run results per dataset rather than averages across seeds.
 
 \begin{table}[htbp]
 \centering
@@ -793,9 +799,9 @@ The experiment was run on Breast-W, Ionosphere, and Sonar with five seeds
 \resizebox{\textwidth}{!}{%
 \begin{tabular}{lrrrrrr}
 \toprule
-Architecture & Val Acc & Test Acc & Val--Test Gap & Test AUC & Fit s & Evaluations/gen \\
+Architecture & Val Acc & Test Acc & Val--Test Gap & Test AUC & Fit s & Per-generation workload \\
 \midrule
-Michigan ES-CFS & $0.924\pm0.014$ & $\mathbf{0.882}\pm0.022$ & $\mathbf{0.042}\pm0.012$ & $\mathbf{0.935}\pm0.014$ & $\mathbf{0.444}\pm0.036$ & $250$ neurons + $1$ output fit \\
+Michigan ES-CFS & $0.924\pm0.014$ & $\mathbf{0.882}\pm0.022$ & $\mathbf{0.042}\pm0.012$ & $\mathbf{0.935}\pm0.014$ & $\mathbf{0.444}\pm0.036$ & $300$ neurons + $1$ output fit \\
 Pittsburgh ES & $\mathbf{0.998}\pm0.002$ & $0.818\pm0.030$ & $0.180\pm0.030$ & $0.864\pm0.028$ & $4.873\pm0.145$ & $400$ networks \\
 \bottomrule
 \end{tabular}%
@@ -910,85 +916,6 @@ Pittsburgh variant removes one possible confounding factor by sharing the
 output solver. Both results favour the proposed Michigan representation under
 the tested setting.
 
-\subsubsection{Wilcoxon Paired Signed-Rank Test}
-\label{subsubsec:exp_wilcoxon_michigan_pittsburgh}
-
-The descriptive averages above are useful, but they do not by themselves show
-whether the observed differences are consistently aligned across individual
-runs. For that reason, a Wilcoxon paired signed-rank test was added to the
-final comparison~\cite{wilcoxon1945}. This test is appropriate here because
-the observations are naturally paired by dataset and random seed, the number
-of runs is limited, and the test does not require assuming that the paired
-differences are normally distributed.
-
-Two paired comparisons are analysed. The first compares Michigan ES-CFS with
-the full Pittsburgh ES baseline, where one Pittsburgh individual is a complete
-neural network. The second compares Michigan ES-CFS with the matched-budget
-Pittsburgh variant, where one Pittsburgh individual is a complete hidden
-layer evaluated with the same logistic output solver used by Michigan. In both
-cases, each pair corresponds to the same dataset, seed, split, and test
-metric. The paired difference is defined as
-\[
-    \Delta =
-    \mathrm{metric}_{\mathrm{Michigan}}
-    -
-    \mathrm{metric}_{\mathrm{Pittsburgh}},
-\]
-so positive values favour Michigan and negative values favour Pittsburgh. Test
-accuracy is the primary metric. Test ROC-AUC is included as a secondary
-analysis because individual paired ROC-AUC values are available for all
-architectures. The tests are bilateral, use $\alpha=0.05$, and the secondary
-ROC-AUC p-values are adjusted with Holm--Bonferroni correction. Zero
-differences, when present, are discarded from the signed-rank calculation
-using the standard Wilcoxon convention. The implementation uses the automatic
-SciPy method, which applies an exact calculation when it is valid and otherwise
-uses the appropriate fallback for ties or zero differences.
-
-\begin{table}[htbp]
-\centering
-\caption{Wilcoxon paired signed-rank tests for the Michigan--Pittsburgh comparison. Observations are paired by dataset and seed, $\Delta$ is computed as Michigan minus Pittsburgh, all metrics are test metrics, and the test is bilateral. Adjusted p-values are Holm--Bonferroni corrected only for the secondary ROC-AUC analyses.}
-\label{tab:wilcoxon_michigan_pittsburgh}
-\resizebox{\textwidth}{!}{%
-\begin{tabular}{llrrrrrrl}
-\toprule
-Comparison & Metric & $n$ & Median $\Delta$ & $W$ & p-value & Adjusted p-value & Rank-biserial effect & Interpretation \\
-\midrule
-Michigan vs. Pittsburgh ES & Test accuracy & 15 & $0.042$ & $6.500$ & $0.002$ & -- & $0.892$ & Significant, favours Michigan \\
-Michigan vs. Pittsburgh ES & Test ROC-AUC & 15 & $0.095$ & $15.000$ & $0.008$ & $0.008$ & $0.750$ & Significant, favours Michigan \\
-Michigan vs. Pittsburgh matched-budget & Test accuracy & 15 & $0.056$ & $2.000$ & $0.002$ & -- & $0.962$ & Significant, favours Michigan \\
-Michigan vs. Pittsburgh matched-budget & Test ROC-AUC & 15 & $0.089$ & $3.000$ & $<0.001$ & $<0.001$ & $0.950$ & Significant, favours Michigan \\
-\bottomrule
-\end{tabular}%
-}
-\end{table}
-
-The primary test-accuracy results reject the null hypothesis of zero median
-paired difference in both comparisons. Against full Pittsburgh ES, the median
-paired test-accuracy difference is $0.042$ in favour of Michigan, with
-$p=0.002$ and a positive rank-biserial effect of $0.892$. Against the
-matched-budget Pittsburgh variant, the median paired difference is $0.056$,
-also in favour of Michigan, with $p=0.002$ and a rank-biserial effect of
-$0.962$. These results indicate that the mean differences reported earlier
-are not driven only by a small number of favourable runs.
-
-The secondary ROC-AUC analysis points in the same direction. After
-Holm--Bonferroni correction, both ROC-AUC comparisons remain significant:
-$p=0.008$ for Michigan against full Pittsburgh ES and adjusted $p<0.001$ for
-Michigan against the matched-budget Pittsburgh variant. This supports the
-interpretation that the advantage is not limited to hard accuracy, but also
-appears in the ranking quality of the probabilistic scores. Training time is
-kept as a separate efficiency argument: the statistical test evaluates
-predictive test metrics, while the runtime results above describe the
-accuracy-time trade-off.
-
-The paired statistical analysis complements the descriptive averages reported
-above. Rather than relying only on mean test performance, it evaluates whether
-the observed differences are consistently aligned across matched runs. Under
-the experimental conditions considered here, the result supports the claim
-that the Michigan representation offers a better generalisation profile than
-the Pittsburgh baseline. This conclusion is limited to the evaluated datasets,
-seeds, computational budget, and implementation choices, and should not be
-interpreted as a universal superiority claim over all forms of neuroevolution.
 
 \subsubsection{Overall Experimental Discussion}
 \label{subsec:experiments_overall}
