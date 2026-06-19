@@ -9,7 +9,6 @@ Final policy applied:
 Plots retained in runs/ because they are referenced by memoria.txt:
 - runs/accuracy_time_tradeoff.png
 - runs/baseline_test_accuracy.png
-- runs/higgs_predictions.png
 - runs/lambda_sensitivity.png
 - runs/lasso_accuracy_sparsity.png
 - runs/lasso_dataset_sparsity.png

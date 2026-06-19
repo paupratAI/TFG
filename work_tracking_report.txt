@@ -54,7 +54,7 @@ CFS is the strongest overall strategy, obtaining the best validation accuracy,
 test accuracy, and ROC-AUC among the tested alternatives.
 
 The regression objective has also been addressed. A dedicated benchmark
-evaluates the Ridge/GCV architecture on Higgs, Friedman1, and Diabetes. The
+evaluates the Ridge/GCV architecture on California Housing, Friedman1, and Diabetes. The
 evolved Ridge model improves over both Linear Ridge and Random tanh Ridge on
 all three datasets in terms of test RMSE. This suggests that the evolved hidden
 representation is useful beyond binary classification.

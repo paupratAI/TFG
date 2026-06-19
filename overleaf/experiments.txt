@@ -411,20 +411,18 @@ Ridge/GCV. The checkpoint is selected by validation RMSE.
 The experiment uses three datasets:
 
 \begin{itemize}
-    \item Higgs-12000, where the target is treated as a numeric $0/1$
-    score in a regression setting;
+    \item CaliforniaHousing-12000, a real housing-value regression dataset
+    with a continuous target;
     \item Friedman1-12000, a synthetic continuous regression dataset;
     \item Diabetes, a real continuous regression dataset from scikit-learn.
 \end{itemize}
 
-Higgs-12000 is not used here as a standard binary-classification benchmark.
-Instead, it is deliberately used as a score-regression stress test. Treating
-the original class label as a continuous $0/1$ target asks whether the
-Ridge/GCV output can learn a stable numerical score that separates the two
-classes without using a logistic loss. This is a demanding but informative way
-to test the robustness of the regression-oriented architecture, because the
-target is bounded and discrete while the model is optimised with a squared-loss
-regression objective.
+California Housing is appropriate here because its target is genuinely
+continuous: the median house value of a district. This makes it a natural
+benchmark for the Ridge/GCV regression path. It is also useful because it is a
+real tabular problem with nonlinear effects and only eight input features, so
+the experiment tests whether the evolved tanh representation can add value
+beyond a linear Ridge model in a genuine regression setting.
 
 The compared models are Linear Ridge+GCV, Random tanh Ridge+GCV, ES-selected
 Ridge+GCV, HistGradientBoosting, and Gradient MLP. For the ES model, CFS, OMP,
@@ -440,23 +438,23 @@ validation RMSE is reported.
 \toprule
 Dataset & Model & Val RMSE & Test RMSE & Test MAE & Test $R^2$ \\
 \midrule
-Higgs-12000 & Linear Ridge+GCV & $0.475$ & $0.471$ & $0.451$ & $0.111$ \\
-Higgs-12000 & Random tanh Ridge+GCV & $0.474$ & $0.469$ & $0.446$ & $0.121$ \\
-Higgs-12000 & ES-selected Ridge+GCV & $0.466$ & $0.461$ & $0.429$ & $0.148$ \\
-Higgs-12000 & HistGradientBoosting & $\mathbf{0.440}$ & $\mathbf{0.443}$ & $\mathbf{0.389}$ & $\mathbf{0.217}$ \\
-Higgs-12000 & Gradient MLP & $0.469$ & $0.466$ & $0.431$ & $0.130$ \\
+CaliforniaHousing-12000 & Linear Ridge+GCV & $0.731$ & $0.749$ & $0.544$ & $0.593$ \\
+CaliforniaHousing-12000 & Random tanh Ridge+GCV & $0.621$ & $0.639$ & $0.456$ & $0.704$ \\
+CaliforniaHousing-12000 & ES-selected Ridge+GCV & $0.548$ & $0.565$ & $0.392$ & $0.769$ \\
+CaliforniaHousing-12000 & HistGradientBoosting & $\mathbf{0.486}$ & $\mathbf{0.487}$ & $\mathbf{0.324}$ & $\mathbf{0.828}$ \\
+CaliforniaHousing-12000 & Gradient MLP & $0.551$ & $0.542$ & $0.374$ & $0.787$ \\
 \midrule
 Friedman1-12000 & Linear Ridge+GCV & $2.587$ & $2.733$ & $2.118$ & $0.703$ \\
 Friedman1-12000 & Random tanh Ridge+GCV & $2.577$ & $2.722$ & $2.098$ & $0.705$ \\
 Friedman1-12000 & ES-selected Ridge+GCV & $2.061$ & $2.070$ & $1.589$ & $0.830$ \\
 Friedman1-12000 & HistGradientBoosting & $\mathbf{1.134}$ & $\mathbf{1.178}$ & $\mathbf{0.933}$ & $\mathbf{0.945}$ \\
-Friedman1-12000 & Gradient MLP & $1.219$ & $1.278$ & $1.016$ & $0.935$ \\
+Friedman1-12000 & Gradient MLP & $1.219$ & $1.278$ & $1.015$ & $0.935$ \\
 \midrule
 Diabetes & Linear Ridge+GCV & $60.106$ & $54.236$ & $43.080$ & $0.445$ \\
 Diabetes & Random tanh Ridge+GCV & $59.810$ & $53.880$ & $42.816$ & $0.452$ \\
 Diabetes & ES-selected Ridge+GCV & $\mathbf{59.615}$ & $\mathbf{50.544}$ & $\mathbf{39.743}$ & $\mathbf{0.518}$ \\
 Diabetes & HistGradientBoosting & $63.756$ & $50.865$ & $40.703$ & $0.512$ \\
-Diabetes & Gradient MLP & $62.126$ & $55.973$ & $47.114$ & $0.409$ \\
+Diabetes & Gradient MLP & $62.126$ & $55.973$ & $47.115$ & $0.409$ \\
 \bottomrule
 \end{tabular}%
 }
@@ -471,12 +469,15 @@ Diabetes & Gradient MLP & $62.126$ & $55.973$ & $47.114$ & $0.409$ \\
 
 The strongest claim from this experiment is the Ridge-family ablation.
 ES-selected Ridge+GCV improves over Linear Ridge+GCV and Random tanh
-Ridge+GCV on all three datasets. On Friedman1, for example, test $R^2$
-increases from about $0.70$ for the two simpler Ridge variants to $0.83$ for
-the evolved representation. Figure~\ref{fig:regression_model_comparison}
-summarises this effect without letting the largest-scale dataset dominate the
-visual comparison. On Diabetes, ES-selected Ridge+GCV obtains the best test
-RMSE among all compared models in this run.
+Ridge+GCV on all three datasets. On CaliforniaHousing-12000, test $R^2$
+increases from $0.593$ for Linear Ridge+GCV and $0.704$ for Random tanh
+Ridge+GCV to $0.769$ for the evolved representation. On Friedman1, the same
+pattern appears: test $R^2$ rises from about $0.70$ for the two simpler Ridge
+variants to $0.830$ for the evolved representation.
+Figure~\ref{fig:regression_model_comparison} summarises this effect without
+letting the largest-scale dataset dominate the visual comparison. On Diabetes,
+ES-selected Ridge+GCV obtains the best test RMSE among all compared models in
+this run.
 
 \begin{figure}[htbp]
 \centering
@@ -485,22 +486,21 @@ RMSE among all compared models in this run.
 \label{fig:regression_value_summary}
 \end{figure}
 
-The external baseline comparison is more mixed. HistGradientBoosting is clearly
-stronger on Higgs and Friedman1. The prototype should therefore not be
-presented as the best general-purpose regressor. The defensible conclusion is
-more specific: the evolved hidden representation adds measurable value to the
-closed-form Ridge output model, and the same idea can be extended beyond
-classification.
+The external baseline comparison is more mixed. HistGradientBoosting is
+stronger on CaliforniaHousing-12000 and Friedman1, and Gradient MLP is also
+stronger than ES-selected Ridge+GCV on CaliforniaHousing-12000. The prototype
+should therefore not be presented as the best general-purpose regressor. The
+defensible conclusion is more specific: the evolved hidden representation adds
+measurable value to the closed-form Ridge output model, and the same idea can
+be extended beyond classification.
 
-The value summary is more informative than plotting individual Higgs
-predictions. Higgs is included as a score-regression stress test, but its
-target is still a numeric $0/1$ score, so a prediction scatter plot can be
-visually misleading: a good model is expected to produce an ordered score, not
-a continuous physical measurement spread over many target values. The
-percentage-gain plot focuses instead on the actual regression question: whether
-the evolved representation improves the Ridge output model under this
-stress-test formulation. It does so on all three datasets, while also making
-clear that specialised tabular regressors can still be better on some problems.
+The value summary focuses on the most relevant regression question: whether
+the evolved representation improves the Ridge output model. It does so on all
+three continuous regression datasets. The improvement is especially visible on
+CaliforniaHousing-12000 and Friedman1, where the nonlinear structure of the
+data makes the linear Ridge baseline clearly insufficient. At the same time,
+the comparison with HistGradientBoosting shows that specialised tabular
+regressors can still be better on some problems.
 
 \begin{table}[htbp]
 \centering
@@ -510,9 +510,9 @@ clear that specialised tabular regressors can still be better on some problems.
 \toprule
 Dataset & ES candidate & Val RMSE & Test RMSE \\
 \midrule
-Higgs-12000 & ES-CFS Ridge+GCV & $\mathbf{0.466}$ & $\mathbf{0.461}$ \\
-Higgs-12000 & ES-OMP Ridge+GCV & $0.470$ & $0.469$ \\
-Higgs-12000 & ES-$R^2$ Ridge+GCV & $0.476$ & $0.473$ \\
+CaliforniaHousing-12000 & ES-CFS Ridge+GCV & $0.584$ & $0.597$ \\
+CaliforniaHousing-12000 & ES-OMP Ridge+GCV & $\mathbf{0.548}$ & $\mathbf{0.565}$ \\
+CaliforniaHousing-12000 & ES-$R^2$ Ridge+GCV & $0.613$ & $0.620$ \\
 \midrule
 Friedman1-12000 & ES-CFS Ridge+GCV & $2.461$ & $2.578$ \\
 Friedman1-12000 & ES-OMP Ridge+GCV & $\mathbf{2.061}$ & $\mathbf{2.070}$ \\
@@ -525,9 +525,9 @@ Diabetes & ES-$R^2$ Ridge+GCV & $\mathbf{59.615}$ & $\mathbf{50.544}$ \\
 \end{tabular}
 \end{table}
 
-The best selection strategy changes by dataset: CFS for Higgs, OMP for
-Friedman1, and $R^2$ for Diabetes. This confirms that neuron selection is a
-real modelling choice. It also supports validation-based strategy selection:
+The best selection strategy changes by dataset: OMP for CaliforniaHousing-12000
+and Friedman1, and $R^2$ for Diabetes. This confirms that neuron selection is
+a real modelling choice. It also supports validation-based strategy selection:
 in the three regression datasets, the best validation strategy also obtains
 the best test RMSE among the ES candidates.
 
@@ -535,17 +535,17 @@ The regression experiment also helps interpret the role of CFS. In binary
 classification, CFS is the strongest overall strategy. In regression, CFS is
 not always best. This is not a contradiction. The strategies use different
 signals, and different target structures may reward different forms of credit
-assignment. Friedman1, for example, is a smooth nonlinear regression function,
-and OMP's residual criterion performs best in the reported run. Diabetes is a
-small real regression dataset where marginal $R^2$ with diversity is best.
+assignment. CaliforniaHousing-12000 and Friedman1 both reward OMP's residual
+criterion in the reported run, while Diabetes is a small real regression
+dataset where marginal $R^2$ with diversity is best.
 This suggests that future versions of the method should not hard-code a single
 selection rule for every task.
 
 Overall, the regression results strengthen the thesis in a specific way. They
 do not show that the prototype is a universal replacement for tree ensembles.
 They show that the evolved tanh representation is useful when the output
-layer is a Ridge regressor and the target is continuous or treated as
-continuous. This matters because the Ridge/GCV regression architecture is naturally
+layer is a Ridge regressor and the target is continuous. This matters because
+the Ridge/GCV regression architecture is naturally
 compatible with regression. In this experiment the output layer is used
 exactly as a regression model, not as a classifier. The fact that the
 ES-selected representation improves over linear and random-feature Ridge in
@@ -909,6 +909,86 @@ therefore the most conceptually important result. The matched-budget
 Pittsburgh variant removes one possible confounding factor by sharing the
 output solver. Both results favour the proposed Michigan representation under
 the tested setting.
+
+\subsubsection{Wilcoxon Paired Signed-Rank Test}
+\label{subsubsec:exp_wilcoxon_michigan_pittsburgh}
+
+The descriptive averages above are useful, but they do not by themselves show
+whether the observed differences are consistently aligned across individual
+runs. For that reason, a Wilcoxon paired signed-rank test was added to the
+final comparison~\cite{wilcoxon1945}. This test is appropriate here because
+the observations are naturally paired by dataset and random seed, the number
+of runs is limited, and the test does not require assuming that the paired
+differences are normally distributed.
+
+Two paired comparisons are analysed. The first compares Michigan ES-CFS with
+the full Pittsburgh ES baseline, where one Pittsburgh individual is a complete
+neural network. The second compares Michigan ES-CFS with the matched-budget
+Pittsburgh variant, where one Pittsburgh individual is a complete hidden
+layer evaluated with the same logistic output solver used by Michigan. In both
+cases, each pair corresponds to the same dataset, seed, split, and test
+metric. The paired difference is defined as
+\[
+    \Delta =
+    \mathrm{metric}_{\mathrm{Michigan}}
+    -
+    \mathrm{metric}_{\mathrm{Pittsburgh}},
+\]
+so positive values favour Michigan and negative values favour Pittsburgh. Test
+accuracy is the primary metric. Test ROC-AUC is included as a secondary
+analysis because individual paired ROC-AUC values are available for all
+architectures. The tests are bilateral, use $\alpha=0.05$, and the secondary
+ROC-AUC p-values are adjusted with Holm--Bonferroni correction. Zero
+differences, when present, are discarded from the signed-rank calculation
+using the standard Wilcoxon convention. The implementation uses the automatic
+SciPy method, which applies an exact calculation when it is valid and otherwise
+uses the appropriate fallback for ties or zero differences.
+
+\begin{table}[htbp]
+\centering
+\caption{Wilcoxon paired signed-rank tests for the Michigan--Pittsburgh comparison. Observations are paired by dataset and seed, $\Delta$ is computed as Michigan minus Pittsburgh, all metrics are test metrics, and the test is bilateral. Adjusted p-values are Holm--Bonferroni corrected only for the secondary ROC-AUC analyses.}
+\label{tab:wilcoxon_michigan_pittsburgh}
+\resizebox{\textwidth}{!}{%
+\begin{tabular}{llrrrrrrl}
+\toprule
+Comparison & Metric & $n$ & Median $\Delta$ & $W$ & p-value & Adjusted p-value & Rank-biserial effect & Interpretation \\
+\midrule
+Michigan vs. Pittsburgh ES & Test accuracy & 15 & $0.042$ & $6.500$ & $0.002$ & -- & $0.892$ & Significant, favours Michigan \\
+Michigan vs. Pittsburgh ES & Test ROC-AUC & 15 & $0.095$ & $15.000$ & $0.008$ & $0.008$ & $0.750$ & Significant, favours Michigan \\
+Michigan vs. Pittsburgh matched-budget & Test accuracy & 15 & $0.056$ & $2.000$ & $0.002$ & -- & $0.962$ & Significant, favours Michigan \\
+Michigan vs. Pittsburgh matched-budget & Test ROC-AUC & 15 & $0.089$ & $3.000$ & $<0.001$ & $<0.001$ & $0.950$ & Significant, favours Michigan \\
+\bottomrule
+\end{tabular}%
+}
+\end{table}
+
+The primary test-accuracy results reject the null hypothesis of zero median
+paired difference in both comparisons. Against full Pittsburgh ES, the median
+paired test-accuracy difference is $0.042$ in favour of Michigan, with
+$p=0.002$ and a positive rank-biserial effect of $0.892$. Against the
+matched-budget Pittsburgh variant, the median paired difference is $0.056$,
+also in favour of Michigan, with $p=0.002$ and a rank-biserial effect of
+$0.962$. These results indicate that the mean differences reported earlier
+are not driven only by a small number of favourable runs.
+
+The secondary ROC-AUC analysis points in the same direction. After
+Holm--Bonferroni correction, both ROC-AUC comparisons remain significant:
+$p=0.008$ for Michigan against full Pittsburgh ES and adjusted $p<0.001$ for
+Michigan against the matched-budget Pittsburgh variant. This supports the
+interpretation that the advantage is not limited to hard accuracy, but also
+appears in the ranking quality of the probabilistic scores. Training time is
+kept as a separate efficiency argument: the statistical test evaluates
+predictive test metrics, while the runtime results above describe the
+accuracy-time trade-off.
+
+The paired statistical analysis complements the descriptive averages reported
+above. Rather than relying only on mean test performance, it evaluates whether
+the observed differences are consistently aligned across matched runs. Under
+the experimental conditions considered here, the result supports the claim
+that the Michigan representation offers a better generalisation profile than
+the Pittsburgh baseline. This conclusion is limited to the evaluated datasets,
+seeds, computational budget, and implementation choices, and should not be
+interpreted as a universal superiority claim over all forms of neuroevolution.
 
 \subsubsection{Overall Experimental Discussion}
 \label{subsec:experiments_overall}

@@ -298,4 +298,9 @@ Faustino Gomez, J"urgen Schmidhuber, and Risto Miikkulainen.
 synapses.
 \newblock \emph{Journal of Machine Learning Research}, 9:937--965, 2008.
 
+\bibitem{wilcoxon1945}
+Frank Wilcoxon.
+\newblock Individual comparisons by ranking methods.
+\newblock \emph{Biometrics Bulletin}, 1(6):80--83, 1945.
+
 \end{thebibliography}

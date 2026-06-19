@@ -86,7 +86,8 @@ Run the regression-oriented benchmark:
 
 ```bash
 python ridge_regression_benchmark.py \
-  --datasets higgs friedman1 diabetes \
+  --datasets california friedman1 diabetes \
+  --data-home .sklearn_data \
   --max-samples 12000 \
   --es-strategies cfs omp r2 \
   --es-epochs 35 \

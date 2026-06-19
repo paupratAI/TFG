@@ -186,12 +186,12 @@ def save_strategy_cost_summary() -> None:
 
 
 REGRESSION_ROWS = {
-    "Higgs-12000": {
-        "Linear Ridge+GCV": {"test_rmse": 0.471, "test_r2": 0.111},
-        "Random tanh Ridge+GCV": {"test_rmse": 0.469, "test_r2": 0.121},
-        "ES-selected Ridge+GCV": {"test_rmse": 0.461, "test_r2": 0.148},
-        "HistGradientBoosting": {"test_rmse": 0.443, "test_r2": 0.217},
-        "Gradient MLP": {"test_rmse": 0.466, "test_r2": 0.130},
+    "CaliforniaHousing-12000": {
+        "Linear Ridge+GCV": {"test_rmse": 0.749, "test_r2": 0.593},
+        "Random tanh Ridge+GCV": {"test_rmse": 0.639, "test_r2": 0.704},
+        "ES-selected Ridge+GCV": {"test_rmse": 0.565, "test_r2": 0.769},
+        "HistGradientBoosting": {"test_rmse": 0.487, "test_r2": 0.828},
+        "Gradient MLP": {"test_rmse": 0.542, "test_r2": 0.787},
     },
     "Friedman1-12000": {
         "Linear Ridge+GCV": {"test_rmse": 2.733, "test_r2": 0.703},
@@ -208,6 +208,24 @@ REGRESSION_ROWS = {
         "Gradient MLP": {"test_rmse": 55.973, "test_r2": 0.409},
     },
 }
+
+
+def _regression_rows() -> dict[str, dict[str, dict[str, float]]]:
+    summary_path = RUNS_DIR / "ridge_regression" / "summary.json"
+    if not summary_path.exists():
+        return REGRESSION_ROWS
+
+    payload = _load_json(summary_path)
+    rows: dict[str, dict[str, dict[str, float]]] = {}
+    for result in payload["results"]:
+        dataset = str(result["dataset"])
+        rows[dataset] = {}
+        for row in result["rows"]:
+            rows[dataset][str(row["model"])] = {
+                "test_rmse": float(row["test_rmse"]),
+                "test_r2": float(row["test_r2"]),
+            }
+    return rows
 
 
 SOFTMAX_ROWS = {
@@ -230,13 +248,14 @@ SOFTMAX_ROWS = {
 
 
 def save_regression_model_comparison() -> None:
+    regression_rows = _regression_rows()
     models = ["Linear Ridge+GCV", "Random tanh Ridge+GCV", "ES-selected Ridge+GCV"]
     labels = ["Linear\nRidge+GCV", "Random tanh\nRidge+GCV", "ES-selected\nRidge+GCV"]
     colors = [GREY, LIGHT_ORANGE, BLUE]
     values = []
     for model in models:
         normalised = []
-        for rows in REGRESSION_ROWS.values():
+        for rows in regression_rows.values():
             baseline = rows["Linear Ridge+GCV"]["test_rmse"]
             normalised.append(rows[model]["test_rmse"] / baseline)
         values.append(float(np.mean(normalised)))
@@ -249,7 +268,7 @@ def save_regression_model_comparison() -> None:
     ax.set_ylabel("Normalised RMSE (lower is better)")
     ax.set_xticks(x)
     ax.set_xticklabels(labels)
-    ax.set_ylim(0.84, 1.03)
+    ax.set_ylim(max(0.0, min(values) - 0.06), 1.03)
     ax.grid(True, axis="y", alpha=0.25)
     for bar, value in zip(bars, values):
         ax.text(bar.get_x() + bar.get_width() / 2, value + 0.006, f"{value:.3f}", ha="center", fontsize=9)
@@ -259,11 +278,12 @@ def save_regression_model_comparison() -> None:
 
 
 def save_regression_value_summary() -> None:
-    datasets = list(REGRESSION_ROWS)
+    regression_rows = _regression_rows()
+    datasets = list(regression_rows)
     simple_models = ["Linear Ridge+GCV", "Random tanh Ridge+GCV"]
     rmse_gain = []
     for dataset in datasets:
-        rows = REGRESSION_ROWS[dataset]
+        rows = regression_rows[dataset]
         best_simple_rmse = min(rows[m]["test_rmse"] for m in simple_models)
         es_rmse = rows["ES-selected Ridge+GCV"]["test_rmse"]
         rmse_gain.append(100.0 * (best_simple_rmse - es_rmse) / best_simple_rmse)

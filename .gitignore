@@ -5,5 +5,6 @@ oldgcv.py
 .DS_Store
 runs/
 .openml_cache/
+.sklearn_data/
 .matplotlib_cache/
 .font_cache/
