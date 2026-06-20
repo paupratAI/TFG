@@ -229,6 +229,23 @@ when it complements other selected neurons. Another explanation is cost:
 ranking every candidate activation introduces extra computation, and the
 improvement is not consistent enough to justify it as the default strategy.
 
+\begin{figure}[htbp]
+\centering
+\includegraphics[width=0.86\textwidth]{plots_overleaf/overfit_sanity_check.png}
+\caption{Overfitting sanity check for ES-CFS. The selected models reach almost perfect training accuracy, while validation and test accuracy remain lower.}
+\label{fig:overfit_sanity_check}
+\end{figure}
+
+After selecting CFS as the default strategy, I also used it as a basic
+capacity check. Early versions based mainly on marginal neuron scoring
+produced many similar hidden neurons, so the learning curve did not improve in
+a convincing way. With subset-level CFS selection, the prototype can memorise
+the training split, as shown in Figure~\ref{fig:overfit_sanity_check}. This
+does not imply good generalisation by itself, but it confirms that the model
+has enough capacity and that the remaining experimental question is how well
+that capacity is controlled by validation and by the neuron-selection
+strategy.
+
 \subsubsection{Comparison with Standard Tabular Baselines}
 \label{subsec:experiments_baselines}
 

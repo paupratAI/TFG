@@ -169,6 +169,16 @@ David E. Rumelhart, Geoffrey E. Hinton, and Ronald J. Williams.
 \newblock Learning representations by back-propagating errors.
 \newblock \emph{Nature}, 323:533--536, 1986.
 
+\bibitem{cybenko1989approximation}
+George Cybenko.
+\newblock Approximation by superpositions of a sigmoidal function.
+\newblock \emph{Mathematics of Control, Signals and Systems}, 2(4):303--314, 1989.
+
+\bibitem{rahimi2008random}
+Ali Rahimi and Benjamin Recht.
+\newblock Random features for large-scale kernel machines.
+\newblock In \emph{Advances in Neural Information Processing Systems 20}, pages 1177--1184, 2008.
+
 \bibitem{holland1975adaptation}
 John H. Holland.
 \newblock \emph{Adaptation in Natural and Artificial Systems}.

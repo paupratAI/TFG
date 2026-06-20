@@ -89,14 +89,18 @@ transformation the output layer works in the hidden space
 The complete model is nonlinear in the original feature space, while the final
 output layer can remain simple. This view is central to the thesis because the
 evolutionary algorithm does not evolve complete deep networks, but searches
-for useful hidden features.
+for useful hidden features. The idea that a single hidden layer with nonlinear
+activation functions can represent rich function classes is a classical result
+in neural-network theory~\cite{cybenko1989approximation}.
 
 The quality of the hidden representation is crucial. Random hidden
 neurons can sometimes work, especially with a large enough hidden layer, but
-they may also be saturated, irrelevant, or redundant. The proposed method tries
-to improve the feature map by evolving candidate neurons and selecting a
-cooperative subset. This keeps the model small enough to analyse while still
-allowing nonlinear prediction.
+they may also be saturated, irrelevant, or redundant. This is related to the
+broader idea of using random nonlinear features as a simple approximation
+mechanism~\cite{rahimi2008random}. The proposed method tries to improve the
+feature map by evolving candidate neurons and selecting a cooperative subset.
+This keeps the model small enough to analyse while still allowing nonlinear
+prediction.
 
 \subsubsection{Backpropagation as the standard reference}
 \label{subsec:background_backprop}

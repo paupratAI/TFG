@@ -185,6 +185,64 @@ def save_strategy_cost_summary() -> None:
     _save(fig, "strategy_cost_summary.png")
 
 
+def save_overfit_sanity_check() -> None:
+    payload = _load_json("runs/strategy_comparison/strategy_comparison_all_runs.json")
+    datasets = ["Breast-W", "Ionosphere", "Sonar"]
+    metric_keys = ["final_train_acc", "validation_acc", "test_acc"]
+    labels = ["Train", "Validation", "Test"]
+    colors = [GREEN, LIGHT_BLUE, BLUE]
+
+    means: dict[str, list[float]] = {dataset: [] for dataset in datasets}
+    stds: dict[str, list[float]] = {dataset: [] for dataset in datasets}
+    for dataset in datasets:
+        runs = [
+            run["results"]["cfs"]["metrics"]
+            for run in payload["runs"]
+            if run["dataset"]["label"] == dataset
+        ]
+        for key in metric_keys:
+            values = np.asarray([float(run[key]) for run in runs], dtype=np.float64)
+            means[dataset].append(float(np.mean(values)))
+            stds[dataset].append(float(np.std(values, ddof=0)))
+
+    x = np.arange(len(datasets))
+    width = 0.24
+    fig, ax = plt.subplots(figsize=(9.2, 4.8), constrained_layout=True)
+    offsets = [-width, 0.0, width]
+    for idx, (label, color, offset) in enumerate(zip(labels, colors, offsets)):
+        values = [means[dataset][idx] for dataset in datasets]
+        errors = [stds[dataset][idx] for dataset in datasets]
+        bars = ax.bar(
+            x + offset,
+            values,
+            width,
+            yerr=errors,
+            capsize=3,
+            color=color,
+            edgecolor="white",
+            label=label,
+        )
+        for bar, value in zip(bars, values):
+            ax.text(
+                bar.get_x() + bar.get_width() / 2,
+                min(value + 0.008, 1.006),
+                f"{value:.3f}",
+                ha="center",
+                va="bottom",
+                fontsize=8,
+            )
+
+    ax.axhline(1.0, color=DARK, linewidth=1.0, linestyle="--", alpha=0.45)
+    ax.set_title("Overfitting sanity check with ES-CFS")
+    ax.set_ylabel("Accuracy")
+    ax.set_xticks(x)
+    ax.set_xticklabels(datasets)
+    ax.set_ylim(0.72, 1.015)
+    ax.grid(True, axis="y", alpha=0.25)
+    ax.legend(loc="lower left", frameon=True)
+    _save(fig, "overfit_sanity_check.png")
+
+
 REGRESSION_ROWS = {
     "CaliforniaHousing-12000": {
         "Linear Ridge+GCV": {"test_rmse": 0.749, "test_r2": 0.593},
@@ -539,6 +597,7 @@ def save_full_network_pittsburgh_summary() -> None:
 def main() -> None:
     save_binary_benchmark_summary()
     save_strategy_cost_summary()
+    save_overfit_sanity_check()
     save_regression_model_comparison()
     save_regression_value_summary()
     save_softmax_model_comparison()
