@@ -24,8 +24,9 @@ small and higher-dimensional, which makes overfitting easier. This combination
 is appropriate for testing whether the selected hidden neurons add value beyond
 a simple linear classifier. Each dataset is processed with stratified
 train/validation/test splits, median imputation, and standardisation fitted
-only on the training split. For the logistic experiments, the labels are
-mapped to $\{0,1\}$.
+only on the training split. The binary loader stores the targets internally as
+$\{-1,+1\}$; for the logistic experiments, these labels are converted to
+$\{0,1\}$ only inside the cross-entropy output fit.
 
 Unless a specific experiment states otherwise, the binary ES configuration
 uses 50 hidden neurons and 250 offspring neurons per generation. The selected
@@ -170,8 +171,7 @@ The per-dataset results are heterogeneous. CFS obtains the highest ROC-AUC on
 Ionosphere and ties with $R^2$ in mean test accuracy there. On Breast-W, OMP
 has the highest test accuracy and ROC-AUC. On Sonar, OMP has the highest test
 accuracy, lowest cross-entropy, and highest ROC-AUC, while CFS-AUC has the
-highest validation accuracy. Therefore, CFS is selected as the default because
-of its aggregate result across datasets and metrics.
+highest validation accuracy. Therefore, CFS is selected as the default strategy based on its highest aggregate validation accuracy. Test metrics are reported only as post-selection evaluation.
 
 \begin{table}[htbp]
 \centering
@@ -598,7 +598,7 @@ final predictive performance.
 
 \begin{table}[htbp]
 \centering
-\caption{L1-logistic filtering experiment over Breast-W, Ionosphere, and Sonar with ten seeds.}
+\caption{L1-logistic filtering experiment over Breast-W, Ionosphere, and Sonar with ten seeds. Values are reported as mean $\pm$ standard error across seeds.}
 \label{tab:lasso_results}
 \resizebox{\textwidth}{!}{%
 \begin{tabular}{lrrrrr}
@@ -941,14 +941,14 @@ not treated as universal proof of superiority.
 \subsubsection{Threats to Validity}
 \label{subsec:experiments_threats}
 
-The main threats to validity are dataset scale, seed sensitivity, and the
-limited scope of the Pittsburgh baseline. The binary experiments use only
-three small tabular datasets, and several experiments would benefit from more
-seeds. The Pittsburgh comparison uses one concrete full-network ES baseline,
-not every possible Pittsburgh neuroevolution method. The matched-budget
-Pittsburgh variant is useful for isolating representation, but it should be
-interpreted as an auxiliary diagnostic rather than as the default Pittsburgh
-formulation.
+The main threats to validity are the focused scope of the implementation and
+the limited scope of the Pittsburgh baseline. The experiments are designed to
+test a specific single-hidden-layer Michigan representation, not to cover all
+possible neuroevolution systems. The Pittsburgh comparison uses one concrete
+full-network ES baseline, not every possible Pittsburgh neuroevolution method.
+The matched-budget Pittsburgh variant is useful for isolating representation,
+but it should be interpreted as an auxiliary diagnostic rather than as the
+default Pittsburgh formulation.
 
 Another limitation is that the ES hyperparameters were chosen for a practical
 prototype rather than exhaustively optimised. The logistic and

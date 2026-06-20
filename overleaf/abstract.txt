@@ -17,6 +17,7 @@ Un cop fixades les activacions ocultes, la capa de sortida s'ajusta per separat.
 
 L'avaluació compara estratègies de selecció de neurones, baselines estàndard per a dades tabulars, ablations logístiques i Ridge, variants de regressió, filtratge dispers de la capa de sortida logística, models softmax multiclasse i un benchmark evolutiu Michigan versus Pittsburgh. Els resultats no mostren una superioritat universal respecte tots els models clàssics. Tanmateix, donen suport a la hipòtesi principal del treball: en les configuracions avaluades, evolucionar neurones ocultes individuals pot produir una representació oculta útil i oferir una relació favorable entre precisió i temps de càlcul en comparació amb l'evolució de xarxes neuronals completes.
 \end{abstract}
+\endgroup
 
 \newpage
 % Resumen en castellano
@@ -29,3 +30,4 @@ Una vez fijadas las activaciones ocultas, la capa de salida se ajusta por separa
 
 La evaluación compara estrategias de selección de neuronas, baselines estándar para datos tabulares, ablaciones logísticas y Ridge, variantes de regresión, filtrado disperso de la capa de salida logística, modelos softmax multiclase y un benchmark evolutivo Michigan frente a Pittsburgh. Los resultados no muestran una superioridad universal sobre todos los modelos clásicos. Sin embargo, respaldan la hipótesis principal del trabajo: en las configuraciones evaluadas, evolucionar neuronas ocultas individuales puede producir una representación oculta útil y ofrecer un compromiso favorable entre precisión y tiempo de ejecución en comparación con la evolución de redes neuronales completas.
 \end{abstract}
+\endgroup

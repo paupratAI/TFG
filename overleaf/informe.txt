@@ -1092,9 +1092,11 @@ confusion with the Ridge regularisation parameter $\lambda_R$.
 \label{subsec:method_data}
 
 The binary data pipeline fetches numeric OpenML datasets, checks that the
-target is binary, maps the labels to $\{0,1\}$ for logistic training, and
-performs a stratified split. If validation is enabled, the split is
-train/validation/test. Otherwise, it is train/test.
+target is binary, maps the two original classes to $\{-1,+1\}$, and performs a
+stratified split. If validation is enabled, the split is train/validation/test.
+Otherwise, it is train/test. The logistic output layer then converts these
+internal $\{-1,+1\}$ labels to $\{0,1\}$ only when fitting cross-entropy, with
+$+1$ treated as the positive class.
 
 Preprocessing is leak-free. Median imputation and standardisation are fitted
 only on the training split. The fitted imputer and scaler are then applied to

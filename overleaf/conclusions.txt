@@ -92,9 +92,12 @@ defensible.
 \subsection{Limitations}
 \label{subsec:conclusions_limitations}
 
-The clearest limitation is the scale of the evaluation. The experiments are
-reproducible and cover several directions, but they are still small compared
-with a full benchmark study. More datasets and more seeds would be needed before making broad claims.
+The clearest limitation is the scope of the prototype. The experiments are
+reproducible and cover several directions, but the method is still a focused
+single-hidden-layer system rather than a general neuroevolution framework.
+The conclusions should therefore be read as evidence for this particular
+representation and training design, not as a broad statement about all
+possible evolutionary neural networks.
 
 A second limitation is experimental scope. Regression, sparse logistic
 filtering, and softmax are evaluated as targeted extensions rather than as a
@@ -112,14 +115,23 @@ layers, or early-stopping criteria based directly on probabilistic metrics.
 \subsection{Future Work}
 \label{subsec:conclusions_future}
 
-Future work should first expand the benchmark to more OpenML datasets and
-more seeds. A broader evaluation would make the empirical conclusions stronger
-and allow paired comparisons between Michigan, Pittsburgh, standard baselines,
-and ablations.
+Future work should first explore whether the same Michigan idea can be
+extended beyond a single hidden layer. A deeper version would have to decide
+how populations of neurons are organised across layers, how credit assignment
+is propagated between layers, and how the output solver interacts with a
+multi-layer evolved representation. This is an interesting direction, but it
+would probably be large enough to become a separate final-degree project.
 
-A second direction is to integrate binary logistic classification, Ridge/GCV
+Another natural extension is to let the number of hidden neurons vary during
+training. The current prototype fixes the hidden width so that the
+representation can be analysed cleanly, but an adaptive version could add or
+remove neurons depending on validation behaviour, sparsity, or redundancy.
+This would make the architecture more flexible, although it would also make
+the selection and comparison protocol more complex.
+
+A third direction is to integrate binary logistic classification, Ridge/GCV
 regression, softmax classification, and sparse logistic filtering into one
-cleaner training framework. A third direction is to study neuron stability:
+cleaner training framework. A fourth direction is to study neuron stability:
 which neurons survive across seeds, which neurons are removed by the sparse
 output layer, and whether active neurons correspond to meaningful feature
 interactions.
