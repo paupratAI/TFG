@@ -1,11 +1,15 @@
-# TFG Prototype
+# Training Neural Networks with Evolution Strategies
 
-This repository contains a prototype for training a single-hidden-layer MLP on
+Bachelor's thesis (TFG) prototype: a single-hidden-layer MLP trained on
 tabular data without backpropagating through the hidden layer. The hidden layer
-is evolved with a Michigan-style Evolution Strategy: each individual is one
-hidden neuron. The current `ridge` architecture solves the hidden-to-output
-layer analytically with Ridge regression and Generalised Cross-Validation
-(GCV).
+is evolved with a Michigan-style Evolution Strategy (each individual is one
+hidden neuron). The output layer is solved analytically with Ridge regression
+and Generalised Cross-Validation (GCV), or trained as logistic/softmax when
+the task is classification.
+
+- Final report: [`TFG_Pau_Prat_Moreno.pdf`](TFG_Pau_Prat_Moreno.pdf)
+- Defence slides: [`canva_tfg_deck_v2/index.html`](canva_tfg_deck_v2/index.html)
+- LaTeX sources: [`overleaf/`](overleaf/)
 
 ## Main Flow
 
@@ -146,3 +150,14 @@ When `--save-dir` is provided, `train.py` writes:
 - `.json`: run configuration, final metrics, and per-epoch history.
 
 OpenML cache files are written to `.openml_cache/` by default.
+
+## Thesis and slides
+
+The compiled bachelor's thesis is `TFG_Pau_Prat_Moreno.pdf`. Chapter sources
+live in `overleaf/` (`main.txt` includes `abstract`, `introduction`, `report`,
+`experiments`, and `conclusions`). Figures used in the report are in
+`plots_overleaf/`.
+
+The defence deck is a self-contained HTML presentation in `canva_tfg_deck_v2/`.
+Open `canva_tfg_deck_v2/index.html` in a browser. Speaker notes are in
+`canva_tfg_deck_v2/speaker-notes.txt`.

@@ -57,7 +57,7 @@
 
 \clearpage
 \include{introduction}
-\include{informe}
+\include{report}
 \include{experiments}
 \include{conclusions}
 
