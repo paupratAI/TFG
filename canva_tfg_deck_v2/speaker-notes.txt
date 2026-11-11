@@ -1,0 +1,107 @@
+Slide 1: Training Neural Networks with Evolution Strategies
+Introduce the thesis in one sentence: instead of evolving complete neural networks, I evolve individual hidden neurons and let the selected population become a hidden layer.
+
+Slide 2: Can We Evolve a Hidden Layer Neuron by Neuron?
+Frame the thesis as a study of representation. The key difference is not merely a different optimiser but a different meaning for an evolutionary individual.
+
+Slide 3: Beyond Gradient-Based Training
+Clarify that this work does not argue against backpropagation. Backpropagation remains the standard method. The goal is to investigate a different learning dynamic for compact neural models.
+
+Slide 4: A Controlled and Demanding Test Bed
+Explain that tabular data are useful because the model must add value beyond linear methods, random features, and strong classical learners.
+
+Slide 5: Why Evolve Individual Neurons?
+Emphasise the conceptual appeal: each neuron is a natural unit for an Evolution Strategy, but cooperation between neurons creates the main challenge.
+
+Slide 6: Objectives
+State that the objectives are empirical and architectural. The thesis does not claim universal dominance or a new convergence theorem.
+
+Slide 7: Roadmap
+Briefly preview the presentation. Keep this slide fast.
+
+Slide 8: The Neural Model: A Learned Nonlinear Feature Map
+Explain that the hidden layer can be understood as a learned feature map. This viewpoint is crucial because the evolutionary process searches for hidden features.
+
+Slide 9: A Hidden Neuron Is a Candidate Feature
+Make the bridge to feature selection. A neuron does not predict independently; it contributes one candidate feature to the final predictive model.
+
+Slide 10: Two Evolutionary Representations
+Explain that Pittsburgh is simpler for fitness assignment because every individual is a complete solution. Michigan is more granular but must solve cooperative credit assignment.
+
+Slide 11: Credit Assignment: Which Neurons Deserve to Survive?
+Explain redundancy. A neuron can look strong in isolation but add no new information. Conversely, a moderately predictive neuron may be valuable if it explains residual information.
+
+Slide 12: Evolution Strategies at Neuron Level
+Explain that every neuron has its own mutation behaviour. Some neurons can explore locally, while others can make broader moves in parameter space.
+
+Slide 13: Hypothesis
+State this as the central claim tested by the rest of the presentation.
+
+Slide 14: Prototype Overview
+Explain the separation between representation learning and output fitting. Evolution searches for hidden neurons; the output layer is fitted after hidden-layer selection.
+
+Slide 15: One Individual = One Hidden Neuron
+Stress that an individual is deliberately small. This reduces the unit of mutation and selection from a whole network to one feature-producing component.
+
+Slide 16: Training Cycle
+Walk through one generation. Mention that the selected population becomes the hidden layer for that generation.
+
+Slide 17: Four Credit-Assignment Strategies
+Explain that these are four answers to the same question: how to choose neurons that are jointly useful, rather than merely individually correlated with the target.
+
+Slide 18: CFS: Relevance Without Redundancy
+Explain why CFS is conceptually aligned with the Michigan representation. The goal is not a ranking of independent neurons but a subset that works together.
+
+Slide 19: One Hidden Representation, Three Output Models
+Explain why output models are matched to the task. Ridge/GCV is appropriate for continuous targets; logistic and softmax outputs provide probabilities for classification.
+
+Slide 20: Separating Representation Learning from Output Fitting
+Clarify that the architecture separates nonlinear feature discovery from supervised prediction. This makes the method easier to inspect and compare.
+
+Slide 21: Design Trade-Offs
+Present the method honestly. It is not automatically superior; it only works if selection can build a useful cooperative hidden layer.
+
+Slide 22: What Was Evaluated?
+Explain that the evaluation is a sequence of diagnostic experiments, not a single benchmark leaderboard.
+
+Slide 23: Benchmark Tasks
+Briefly state that the binary benchmarks are the main representation study, while regression and multiclass experiments test transferability of the architecture.
+
+Slide 24: Reproducibility and Fair Evaluation
+Explain that validation control is especially important because evolutionary training evaluates many generations and could otherwise overfit design decisions to test data.
+
+Slide 25: How Performance Was Measured
+State that accuracy alone is insufficient. The thesis also evaluates ranking quality, calibration, regression quality, generalisation gaps, and runtime.
+
+Slide 26: Credit Assignment Matters
+Explain that selection strategy materially changes the final hidden representation. CFS was selected as the default because it offered the strongest aggregate balance, not because it won every dataset or every metric.
+
+Slide 27: Performance Must Justify Cost
+Explain that CFS-AUC was theoretically attractive but computationally disproportionate. CFS gave a much better practical performance-cost balance.
+
+Slide 28: Does Evolution Add Value?
+Make the key inference: evolved features beat both linear features and random nonlinear features. Therefore, neuron evolution and cooperative selection add measurable value.
+
+Slide 29: Comparison with Standard Tabular Models
+Be transparent: ES-CFS does not outperform the strongest classical tabular baselines. However, it improves over linear logistic, random nonlinear features, and the tested gradient-trained MLP.
+
+Slide 30: Regression with Ridge/GCV
+Explain that the best neuron-selection strategy changed across regression datasets, so CFS was not assumed to be universally best. The main result is that the evolved representation added value to the Ridge/GCV output layer.
+
+Slide 31: The Hidden Layer Can Be Compressed
+Explain that evolutionary selection is a first structural filter, while L1 logistic regression provides a second supervised filter. This suggests the final representation contains redundancy that can be removed without harming performance.
+
+Slide 32: Multiclass Softmax Models
+Explain that the method shows its strongest benefit on clearly nonlinear multiclass tasks. On Digits, the result is more mixed and should be interpreted cautiously.
+
+Slide 33: Michigan vs Full-Network Pittsburgh Evolution
+This is the key result. Pittsburgh achieved almost perfect validation accuracy but generalised worse. Michigan had higher test accuracy, higher AUC, much lower overfitting gap, and around eleven times lower training time.
+
+Slide 34: Controlling for the Output Solver
+Explain why this control matters. It removes the difference in the number of newly generated hidden neurons and uses the same logistic output solver. The result still favours Michigan.
+
+Slide 35: What Did the Thesis Demonstrate?
+State the main contribution precisely. The thesis supports the Michigan idea within the tested setting; it does not show universal superiority over all machine-learning methods.
+
+Slide 36: Conclusions and Future Work
+End with a balanced conclusion. The contribution is not replacing backpropagation or tree ensembles, but demonstrating that population representation is a meaningful architectural design choice in neuroevolution.
