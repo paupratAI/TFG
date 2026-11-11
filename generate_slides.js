@@ -1,7 +1,7 @@
 const fs = require('fs');
 const path = require('path');
 
-const outDir = path.join(__dirname, 'canva_tfg_deck_v2');
+const outDir = path.join(__dirname, 'docs');
 const assetSrc = path.join(__dirname, 'canva_tfg_deck', 'assets');
 const assetDst = path.join(outDir, 'assets');
 fs.mkdirSync(assetDst, { recursive: true });

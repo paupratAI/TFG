@@ -13,3 +13,6 @@ runs/
 *.pptx
 *.zip
 canva_tfg_deck/
+generate_tfg_pptx.js
+generate_tfg_pptx_v2.js
+generate_tfg_pptx_unified_bg.js
